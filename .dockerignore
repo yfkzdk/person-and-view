@@ -1,0 +1,16 @@
+venv/
+external/
+__pycache__/
+*.pyc
+.git/
+node_modules/
+frontend/node_modules/
+frontend/.next/
+*.egg-info/
+dist/
+build/
+.env.local
+rvc_training_plan/
+docs/
+*.md
+!README.md

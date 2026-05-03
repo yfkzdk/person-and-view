@@ -1,0 +1,1828 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人格与知识长卷 - 3D水墨交互系统</title>
+    <style>
+        /* ================= 基础重置与全局样式 ================= */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&display=swap');
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #E6E2D8;
+            font-family: 'Noto Serif SC', 'KaiTi', serif;
+            color: #1A1A1A;
+            user-select: none;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><filter id="noiseFilter"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23noiseFilter)" opacity="0.05"/></svg>');
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ================= UI 层 ================= */
+        .ui-layer {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .interactive { pointer-events: auto; }
+
+        /* 顶部导航 */
+        .top-bar {
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .scroll-title {
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 4px;
+            background: rgba(230, 226, 216, 0.8);
+            padding: 10px 40px;
+            border: 1px solid #C0B8A8;
+            box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .scroll-title::before, .scroll-title::after {
+            content: '';
+            position: absolute;
+            width: 10px; height: 100%;
+            background: #8B8378;
+            top: 0;
+        }
+        .scroll-title::before { left: -10px; border-radius: 5px 0 0 5px; }
+        .scroll-title::after { right: -10px; border-radius: 0 5px 5px 0; }
+
+        .search-box {
+            padding: 8px 15px;
+            border: 1px solid #8B8378;
+            background: transparent;
+            font-family: inherit;
+            font-size: 16px;
+            outline: none;
+            border-radius: 2px;
+            transition: all 0.3s;
+        }
+        .search-box:focus { background: rgba(255,255,255,0.3); border-color: #5A5A5A; }
+
+        /* 右侧面板：古籍册页 */
+        .side-panel {
+            top: 5%;
+            right: -400px;
+            width: 320px;
+            height: 90%;
+            background: #F0EAD6;
+            border: 8px solid #4A4A4A;
+            border-image: repeating-linear-gradient(45deg, #4A4A4A, #4A4A4A 10px, #3A3A3A 10px, #3A3A3A 20px) 8;
+            box-shadow: -5px 5px 15px rgba(0,0,0,0.2);
+            transition: right 0.8s cubic-bezier(0.25, 1, 0.5, 1);
+            padding: 30px 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        .side-panel.open { right: 40px; }
+        .panel-close {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            cursor: pointer;
+            font-size: 18px;
+            color: #8B0000;
+            border-bottom: 1px solid #8B0000;
+        }
+        .panel-title {
+            font-size: 36px;
+            text-align: center;
+            margin-bottom: 20px;
+            position: relative;
+        }
+        .seal-large {
+            display: inline-block;
+            background-color: #8B1A1A;
+            color: #F0EAD6;
+            padding: 4px 8px;
+            border: 2px solid #8B1A1A;
+            border-radius: 4px;
+            font-size: 16px;
+            vertical-align: top;
+            margin-left: 10px;
+            font-family: 'KaiTi', serif;
+        }
+        .panel-content {
+            flex: 1;
+            writing-mode: vertical-rl;
+            line-height: 2;
+            letter-spacing: 2px;
+            font-size: 18px;
+            color: #333;
+            margin: 0 auto;
+        }
+        /* 节点开关（册页内） */
+        .node-toggle-inline {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            writing-mode: horizontal-tb;
+            font-size: 14px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        .toggle-stamp {
+            width: 40px; height: 40px;
+            border: 2px solid #8B1A1A;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            transition: all 0.3s;
+        }
+        .toggle-stamp.on { background: #8B1A1A; color: #F0EAD6; }
+        .toggle-stamp.off { background: transparent; color: #999; border-color: #999; }
+
+        /* 左下角图例 */
+        .legend-panel {
+            bottom: 20px;
+            left: 20px;
+            background: rgba(240, 234, 214, 0.7);
+            border: 1px solid #C0B8A8;
+            padding: 15px;
+            display: flex;
+            gap: 20px;
+            backdrop-filter: blur(4px);
+        }
+        .legend-item { display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 14px; }
+        .ink-dot { width: 20px; height: 20px; border-radius: 50%; filter: blur(2px); }
+
+        /* ================= 浮空设置按钮 ================= */
+        .floating-fab {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            z-index: 20;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: rgba(240, 234, 216, 0.9);
+            border: 2px solid #8B8378;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            box-shadow: 2px 2px 12px rgba(0,0,0,0.15);
+            transition: all 0.3s;
+            color: #4A4A4A;
+        }
+        .floating-fab:hover {
+            background: rgba(255,255,255,0.95);
+            box-shadow: 3px 3px 18px rgba(0,0,0,0.2);
+            transform: scale(1.05);
+        }
+        .floating-fab::after {
+            content: '设置';
+            position: absolute;
+            right: 64px;
+            font-size: 14px;
+            white-space: nowrap;
+            color: #6B6358;
+            letter-spacing: 2px;
+        }
+
+        /* ================= 设置抽屉 ================= */
+        .settings-drawer {
+            position: absolute;
+            top: 0;
+            right: -420px;
+            width: 400px;
+            height: 100%;
+            background: rgba(240, 234, 216, 0.97);
+            border-left: 4px solid #4A4A4A;
+            z-index: 25;
+            transition: right 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+            display: flex;
+            flex-direction: column;
+            box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+            overflow-y: auto;
+        }
+        .settings-drawer.open { right: 0; }
+
+        .drawer-header {
+            padding: 24px 20px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .drawer-title {
+            font-size: 22px;
+            letter-spacing: 3px;
+            position: relative;
+        }
+        .drawer-close {
+            cursor: pointer;
+            font-size: 20px;
+            color: #8B8378;
+            transition: color 0.2s;
+            padding: 4px 8px;
+        }
+        .drawer-close:hover { color: #4A4A4A; }
+
+        /* 标签页 */
+        .settings-tabs {
+            display: flex;
+            border-bottom: 1px solid #C0B8A8;
+            margin: 16px 20px 0;
+        }
+        .settings-tab {
+            flex: 1;
+            text-align: center;
+            padding: 10px 0;
+            cursor: pointer;
+            font-size: 15px;
+            letter-spacing: 2px;
+            color: #999;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s;
+        }
+        .settings-tab.active {
+            color: #1A1A1A;
+            border-bottom-color: #4A4A4A;
+            font-weight: bold;
+        }
+
+        .drawer-body {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* 设置项 */
+        .setting-group {
+            margin-bottom: 24px;
+        }
+        .setting-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+        .setting-value {
+            font-size: 13px;
+            color: #8B8378;
+        }
+        .setting-slider {
+            width: 100%;
+            -webkit-appearance: none;
+            height: 4px;
+            background: linear-gradient(to right, #C0B8A8, #4A4A4A);
+            border-radius: 2px;
+            outline: none;
+        }
+        .setting-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: #8B1A1A;
+            border: 2px solid #F0EAD6;
+            cursor: pointer;
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+        }
+        .setting-hint {
+            font-size: 12px;
+            color: #AAA;
+            margin-top: 2px;
+        }
+
+        /* 单选组 */
+        .radio-group {
+            display: flex;
+            gap: 8px;
+        }
+        .radio-btn {
+            flex: 1;
+            text-align: center;
+            padding: 8px 0;
+            border: 1px solid #C0B8A8;
+            border-radius: 2px;
+            cursor: pointer;
+            font-size: 13px;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+        }
+        .radio-btn.active {
+            background: #4A4A4A;
+            color: #F0EAD6;
+            border-color: #4A4A4A;
+        }
+
+        /* 下拉选择 */
+        .setting-select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #C0B8A8;
+            background: rgba(255,255,255,0.5);
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+
+        /* 底部按钮 */
+        .drawer-footer {
+            padding: 16px 20px 28px;
+            display: flex;
+            gap: 12px;
+        }
+        .btn-apply, .btn-reset {
+            flex: 1;
+            padding: 10px 0;
+            text-align: center;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 15px;
+            letter-spacing: 2px;
+            border-radius: 2px;
+            transition: all 0.2s;
+        }
+        .btn-apply {
+            background: #4A4A4A;
+            color: #F0EAD6;
+            border: none;
+        }
+        .btn-apply:hover { background: #1A1A1A; }
+        .btn-reset {
+            background: transparent;
+            color: #8B8378;
+            border: 1px solid #C0B8A8;
+        }
+        .btn-reset:hover { border-color: #4A4A4A; color: #4A4A4A; }
+
+        .save-toast {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #4A4A4A;
+            color: #F0EAD6;
+            padding: 10px 24px;
+            border-radius: 2px;
+            font-size: 14px;
+            letter-spacing: 2px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 30;
+            pointer-events: none;
+        }
+        .save-toast.visible { opacity: 1; }
+
+        /* ================= CSS2D 标签样式 ================= */
+        .node-label {
+            font-family: 'Noto Serif SC', serif;
+            color: #1A1A1A;
+            font-size: 16px;
+            pointer-events: auto;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            text-shadow: 1px 1px 2px rgba(230, 226, 216, 0.8);
+            transition: opacity 0.3s;
+        }
+        .node-label.disabled-node { opacity: 0.35; }
+        .node-seal {
+            background-color: transparent;
+            color: #8B1A1A;
+            border: 1px solid #8B1A1A;
+            font-size: 12px;
+            padding: 1px 3px;
+            border-radius: 2px;
+        }
+        .node-toggle-icon {
+            display: inline-block;
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 1px solid currentColor;
+            font-size: 9px;
+            line-height: 14px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+            margin-left: 3px;
+        }
+        .node-label:hover .node-toggle-icon { opacity: 1; }
+
+        /* ================= 加载动画 ================= */
+        #loader {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #E6E2D8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+            font-size: 24px;
+            letter-spacing: 5px;
+            transition: opacity 1s;
+        }
+        .loader-text { transition: opacity 0.5s; }
+
+        /* ================= 图谱编辑 Tab ================= */
+        .graph-toolbar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .graph-search {
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid #C0B8A8;
+            background: rgba(255,255,255,0.4);
+            font-family: inherit;
+            font-size: 13px;
+            outline: none;
+            border-radius: 2px;
+        }
+        .graph-btn-add {
+            padding: 6px 12px;
+            background: #4A4A4A;
+            color: #F0EAD6;
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            letter-spacing: 1px;
+            white-space: nowrap;
+            transition: background 0.2s;
+        }
+        .graph-btn-add:hover { background: #1A1A1A; }
+        .graph-btn-add.edge-btn { background: transparent; color: #4A4A4A; border: 1px solid #4A4A4A; }
+        .graph-btn-add.edge-btn:hover { background: #4A4A4A; color: #F0EAD6; }
+
+        .graph-node-list, .graph-edge-list {
+            max-height: 240px;
+            overflow-y: auto;
+        }
+        .graph-node-item, .graph-edge-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-bottom: 1px solid #E8E3D5;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .graph-node-item:hover, .graph-edge-item:hover { background: rgba(0,0,0,0.03); }
+        .graph-node-item.editing { background: rgba(0,0,0,0.06); }
+
+        .node-item-label { flex: 1; letter-spacing: 1px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .node-item-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 2px;
+            letter-spacing: 1px;
+            flex-shrink: 0;
+        }
+        .badge-mental_model { background: #E8E0D0; color: #5A4A3A; }
+        .badge-heuristic { background: #D8E8E0; color: #3A5A4A; }
+        .badge-value { background: #E8D8D0; color: #8B3A3A; }
+        .badge-scene { background: #D0D8E8; color: #3A4A6A; }
+        .badge-concept { background: #E0D8E0; color: #5A3A5A; }
+        .node-item-count { font-size: 11px; color: #AAA; flex-shrink: 0; }
+        .node-item-btn, .edge-item-btn {
+            width: 22px; height: 22px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 12px;
+            border-radius: 2px;
+            flex-shrink: 0;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .node-item-btn.edit:hover { background: #D0D8E8; }
+        .node-item-btn.del:hover { background: #F0D0D0; color: #8B1A1A; }
+
+        .graph-section-divider {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 16px 0 8px;
+            padding-top: 12px;
+            border-top: 1px solid #C0B8A8;
+            font-size: 13px;
+            color: #8B8378;
+            letter-spacing: 2px;
+        }
+
+        /* 节点编辑表单 */
+        .graph-edit-form {
+            padding: 12px 10px;
+            background: rgba(0,0,0,0.03);
+            border: 1px solid #C0B8A8;
+            border-radius: 2px;
+            margin-bottom: 8px;
+        }
+        .graph-edit-form label {
+            display: block;
+            font-size: 12px;
+            color: #8B8378;
+            margin-bottom: 2px;
+            margin-top: 8px;
+            letter-spacing: 1px;
+        }
+        .graph-edit-form label:first-child { margin-top: 0; }
+        .graph-edit-form input, .graph-edit-form textarea, .graph-edit-form select {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #C0B8A8;
+            background: rgba(255,255,255,0.6);
+            font-family: inherit;
+            font-size: 13px;
+            outline: none;
+            border-radius: 2px;
+            box-sizing: border-box;
+        }
+        .graph-edit-form textarea { min-height: 50px; resize: vertical; }
+        .graph-form-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            justify-content: flex-end;
+        }
+        .graph-form-actions button {
+            padding: 6px 14px;
+            border-radius: 2px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+        }
+        .btn-save { background: #4A4A4A; color: #F0EAD6; border: none; }
+        .btn-save:hover { background: #1A1A1A; }
+        .btn-cancel { background: transparent; color: #8B8378; border: 1px solid #C0B8A8; }
+        .btn-cancel:hover { border-color: #4A4A4A; }
+
+        .edge-relation-select {
+            width: 100%;
+            padding: 4px 6px;
+            border: 1px solid #C0B8A8;
+            background: rgba(255,255,255,0.5);
+            font-family: inherit;
+            font-size: 12px;
+            outline: none;
+            border-radius: 2px;
+        }
+    </style>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "d3-force-3d": "https://esm.sh/d3-force-3d@3.0.5",
+                "gsap": "https://unpkg.com/gsap@3.12.5/index.js"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="loader"><span class="loader-text">研墨中...</span></div>
+
+    <div id="canvas-container"></div>
+
+    <!-- 顶部导航 -->
+    <div class="ui-layer interactive top-bar">
+        <div class="scroll-title">人格与知识长卷</div>
+        <input type="text" class="search-box" id="search-box" placeholder="寻章...">
+    </div>
+
+    <!-- 古籍册页（节点详情） -->
+    <div class="ui-layer interactive side-panel" id="side-panel">
+        <div class="panel-title" id="panel-name">李白 <span class="seal-large" id="panel-seal">诗仙</span></div>
+        <div class="panel-content" id="panel-desc">
+            大鹏一日同风起，扶摇直上九万里。
+        </div>
+        <div class="node-toggle-inline" id="node-toggle-area" style="display:none;">
+            <div class="toggle-stamp on" id="toggle-stamp">启</div>
+            <span style="font-size:12px;color:#8B8378;">点击启用/禁用</span>
+        </div>
+        <div class="panel-close" id="btn-close">合卷</div>
+    </div>
+
+    <!-- 图例 -->
+    <div class="ui-layer legend-panel">
+        <div class="legend-item"><div class="ink-dot" style="background: #111;"></div>焦墨/理性</div>
+        <div class="legend-item"><div class="ink-dot" style="background: #444;"></div>湿墨/感性</div>
+        <div class="legend-item"><div class="ink-dot" style="background: #777;"></div>飞白/创新</div>
+        <div class="legend-item"><div class="ink-dot" style="background: #333; box-shadow: 0 0 5px #111;"></div>宿墨/务实</div>
+    </div>
+
+    <!-- 浮空设置按钮 -->
+    <div class="ui-layer interactive floating-fab" id="fab-settings" title="设置面板">⚙</div>
+
+    <!-- 设置抽屉 -->
+    <div class="settings-drawer" id="settings-drawer">
+        <div class="drawer-header">
+            <span class="drawer-title">设置中心</span>
+            <span class="drawer-close" id="drawer-close">✕</span>
+        </div>
+        <div class="settings-tabs">
+            <div class="settings-tab active" data-tab="char">角色</div>
+            <div class="settings-tab" data-tab="memory">记忆</div>
+            <div class="settings-tab" data-tab="voice">声音</div>
+            <div class="settings-tab" data-tab="graph">图谱</div>
+        </div>
+        <div class="drawer-body">
+            <!-- 角色 Tab -->
+            <div class="tab-content active" id="tab-char">
+                <div class="setting-group">
+                    <div class="setting-label"><span>人格深度</span><span class="setting-value" id="val-persona-depth">1.0</span></div>
+                    <input class="setting-slider" type="range" min="0" max="2" step="0.1" value="1.0" id="set-persona-depth">
+                    <div class="setting-hint">越高越贴近角色原本性格</div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>温度 (Temperature)</span><span class="setting-value" id="val-temperature">0.7</span></div>
+                    <input class="setting-slider" type="range" min="0" max="2" step="0.05" value="0.7" id="set-temperature">
+                    <div class="setting-hint">低=稳定保守，高=创意跳脱</div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>回复长度</span></div>
+                    <div class="radio-group" id="set-response-length">
+                        <div class="radio-btn" data-val="short">短</div>
+                        <div class="radio-btn active" data-val="medium">中</div>
+                        <div class="radio-btn" data-val="long">长</div>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>创造力</span><span class="setting-value" id="val-creativity">0.5</span></div>
+                    <input class="setting-slider" type="range" min="0" max="1" step="0.05" value="0.5" id="set-creativity">
+                </div>
+            </div>
+            <!-- 记忆 Tab -->
+            <div class="tab-content" id="tab-memory">
+                <div class="setting-group">
+                    <div class="setting-label"><span>检索条数</span><span class="setting-value" id="val-retrieval-count">2</span></div>
+                    <input class="setting-slider" type="range" min="0" max="5" step="1" value="2" id="set-retrieval-count">
+                    <div class="setting-hint">每次对话检索的历史记忆条数</div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>关联阈值</span><span class="setting-value" id="val-relevance-threshold">0.0</span></div>
+                    <input class="setting-slider" type="range" min="0" max="1" step="0.05" value="0.0" id="set-relevance-threshold">
+                    <div class="setting-hint">低于此分数的记忆不返回</div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>上下文长度</span><span class="setting-value" id="val-context-chars">600</span></div>
+                    <input class="setting-slider" type="range" min="200" max="1500" step="50" value="600" id="set-context-chars">
+                    <div class="setting-hint">注入 LLM 的上下文最大字符数</div>
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>历史窗口</span><span class="setting-value" id="val-history-window">30</span></div>
+                    <input class="setting-slider" type="range" min="10" max="60" step="5" value="30" id="set-history-window">
+                    <div class="setting-hint">保留的最近对话轮数</div>
+                </div>
+            </div>
+            <!-- 声音 Tab -->
+            <div class="tab-content" id="tab-voice">
+                <div class="setting-group">
+                    <div class="setting-label"><span>语速</span><span class="setting-value" id="val-speed">1.0</span></div>
+                    <input class="setting-slider" type="range" min="0.5" max="2" step="0.1" value="1.0" id="set-speed">
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>音高</span><span class="setting-value" id="val-pitch">0</span></div>
+                    <input class="setting-slider" type="range" min="-12" max="12" step="1" value="0" id="set-pitch">
+                </div>
+                <div class="setting-group">
+                    <div class="setting-label"><span>音色</span></div>
+                    <select class="setting-select" id="set-voice-id">
+                        <option value="default">默认</option>
+                    </select>
+                </div>
+            </div>
+            <!-- 图谱编辑 Tab -->
+            <div class="tab-content" id="tab-graph">
+                <div class="graph-toolbar">
+                    <input type="text" class="graph-search" id="graph-search" placeholder="搜索节点...">
+                    <button class="graph-btn-add" id="btn-add-node">+ 添加节点</button>
+                </div>
+                <div class="graph-node-list" id="graph-node-list">
+                    <!-- dynamically populated -->
+                </div>
+                <div class="graph-section-divider">
+                    <span>连线管理</span>
+                    <button class="graph-btn-add edge-btn" id="btn-add-edge">+ 添加连线</button>
+                </div>
+                <div class="graph-edge-list" id="graph-edge-list">
+                    <!-- dynamically populated -->
+                </div>
+            </div>
+        </div>
+        <div class="drawer-footer">
+            <button class="btn-reset" id="btn-reset">重置默认</button>
+            <button class="btn-apply" id="btn-apply">应用设置</button>
+        </div>
+    </div>
+
+    <!-- 保存提示 -->
+    <div class="save-toast" id="save-toast">设置已保存</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        import { forceSimulation, forceLink, forceManyBody, forceCenter } from 'd3-force-3d';
+        import gsap from 'gsap';
+
+        // ================= 0. 配置 =================
+        const API_BASE = window.location.origin.replace(':3000',':8765');
+        const CHARACTER_NAME = '童锦程';
+        const BROADCAST_CHANNEL = 'voice-settings-sync';
+
+        // 水墨类型映射
+        const INK_TYPE_MAP = {
+            mental_model: 'dry',      // 思维模型 → 焦墨
+            heuristic: 'wet',         // 启发式 → 湿墨
+            value: 'accumulated',     // 价值观 → 宿墨
+            scene: 'broken',          // 场景 → 飞白
+            concept: 'wet'            // 概念 → 湿墨
+        };
+        const INK_TYPE_NAMES = { wet: '湿墨', dry: '焦墨', accumulated: '宿墨', broken: '飞白' };
+        const INK_TYPE_ENUM = { wet: 0, dry: 1, accumulated: 2, broken: 3 };
+
+        function getInkType(nodeType) {
+            return INK_TYPE_MAP[nodeType] || 'wet';
+        }
+        function getInkEnum(typeStr) { return INK_TYPE_ENUM[typeStr] || 0; }
+
+        // ================= 0.1 设置状态 =================
+        let currentSettings = {
+            character: { persona_depth: 1.0, temperature: 0.7, response_length: 'medium', creativity: 0.5 },
+            memory: { retrieval_count: 2, relevance_threshold: 0.0, context_chars: 600, history_window: 30 },
+            voice: { speed: 1.0, pitch: 0, voice_id: 'default' }
+        };
+        let disabledNodes = [];
+        let currentEditingNodeId = null;
+        let currentCharacter = CHARACTER_NAME;
+
+        // BroadcastChannel 跨页面同步
+        const bc = new BroadcastChannel(BROADCAST_CHANNEL);
+
+        // ================= 0.2 API 调用 =================
+        async function loadKnowledgeGraph(characterName) {
+            const r = await fetch(`${API_BASE}/api/knowledge-graph/${encodeURIComponent(characterName)}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+
+        async function loadSettings() {
+            const r = await fetch(`${API_BASE}/api/settings?session_id=default`);
+            if (!r.ok) return null;
+            return r.json();
+        }
+
+        async function saveSettings(settings) {
+            const r = await fetch(`${API_BASE}/api/settings?session_id=default`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            });
+            return r.json();
+        }
+
+        async function toggleNodeAPI(nodeId, enabled) {
+            const r = await fetch(`${API_BASE}/api/knowledge-graph/${encodeURIComponent(currentCharacter)}/toggle?session_id=default`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ node_id: nodeId, enabled })
+            });
+            return r.json();
+        }
+
+        async function fetchVoiceProfiles() {
+            try {
+                const r = await fetch(`${API_BASE}/api/voice/profiles`);
+                if (r.ok) {
+                    const data = await r.json();
+                    const voices = Array.isArray(data) ? data.map(v => v.name || v) : (data.voices || Object.keys(data));
+                    if (voices.length > 0) populateVoiceSelect(voices);
+                }
+            } catch (_) { /* 后端未启动时忽略 */ }
+        }
+
+        function populateVoiceSelect(voices) {
+            const sel = document.getElementById('set-voice-id');
+            sel.innerHTML = '';
+            voices.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v; opt.textContent = v;
+                sel.appendChild(opt);
+            });
+            if (currentSettings.voice.voice_id && voices.includes(currentSettings.voice.voice_id)) {
+                sel.value = currentSettings.voice.voice_id;
+            }
+        }
+
+        // ================= 0.25 图谱 CRUD API =================
+        async function apiUpsertNode(nodeData) {
+            const r = await fetch(`${API_BASE}/api/knowledge-graph/${encodeURIComponent(currentCharacter)}/nodes?session_id=default`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(nodeData)
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+        async function apiDeleteNode(nodeId) {
+            const r = await fetch(`${API_BASE}/api/knowledge-graph/${encodeURIComponent(currentCharacter)}/nodes/${encodeURIComponent(nodeId)}?session_id=default`, {
+                method: 'DELETE'
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+        async function apiUpsertEdge(edgeData) {
+            const r = await fetch(`${API_BASE}/api/knowledge-graph/${encodeURIComponent(currentCharacter)}/edges?session_id=default`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(edgeData)
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+        async function apiDeleteEdge(source, target) {
+            const r = await fetch(`${API_BASE}/api/knowledge-graph/${encodeURIComponent(currentCharacter)}/edges?session_id=default`, {
+                method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source, target })
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+
+        // ================= 0.26 图谱编辑器 UI =================
+        let editingNodeId = null;
+        const NODE_TYPES = ['mental_model','heuristic','value','scene','concept'];
+        const NODE_TYPE_NAMES = { mental_model:'思维模型', heuristic:'启发式', value:'价值观', scene:'场景', concept:'概念' };
+        const RELATION_TYPES = ['supports','derives_from','contradicts','applies_to','related'];
+        const RELATION_NAMES = { supports:'支持', derives_from:'派生自', contradicts:'矛盾', applies_to:'适用于', related:'相关' };
+
+        function renderNodeList() {
+            const container = document.getElementById('graph-node-list');
+            const searchQ = (document.getElementById('graph-search')?.value || '').toLowerCase();
+            const items = Object.values(nodeMeshes).map(m => ({
+                id: m.userData.id, label: m.userData.label, type: m.userData.type,
+                disabled: m.userData.disabled || disabledNodes.includes(m.userData.id),
+                triggerCount: (nodesData.find(n => n.id === m.userData.id)?.triggers || []).length
+            })).filter(n => !searchQ || n.label.toLowerCase().includes(searchQ) || n.id.toLowerCase().includes(searchQ));
+
+            if (items.length === 0) {
+                container.innerHTML = '<div class="graph-node-item" style="color:#AAA;justify-content:center;">暂无节点</div>';
+                return;
+            }
+            container.innerHTML = items.map(n => `
+                <div class="graph-node-item${editingNodeId === n.id ? ' editing' : ''}${n.disabled ? ' disabled-node' : ''}" data-id="${n.id}">
+                    <span class="node-item-label">${n.label}</span>
+                    <span class="node-item-badge badge-${n.type}">${NODE_TYPE_NAMES[n.type] || n.type}</span>
+                    <span class="node-item-count">${n.triggerCount}触发词</span>
+                    <button class="node-item-btn edit" data-action="edit" data-id="${n.id}" title="编辑">✎</button>
+                    <button class="node-item-btn del" data-action="delete" data-id="${n.id}" title="删除">✕</button>
+                </div>
+            `).join('');
+        }
+
+        function renderEdgeList() {
+            const container = document.getElementById('graph-edge-list');
+            if (linksData.length === 0) {
+                container.innerHTML = '<div class="graph-edge-item" style="color:#AAA;justify-content:center;">暂无连线</div>';
+                return;
+            }
+            container.innerHTML = linksData.map((l, i) => {
+                const srcNode = nodesData.find(n => n.id === (l.source?.id || l.source));
+                const tgtNode = nodesData.find(n => n.id === (l.target?.id || l.target));
+                return `
+                <div class="graph-edge-item">
+                    <span style="font-size:12px;">${srcNode?.label || l.source} → ${tgtNode?.label || l.target}</span>
+                    <select class="edge-relation-select" data-idx="${i}" style="width:auto;margin-left:auto;margin-right:4px;">
+                        ${RELATION_TYPES.map(r => `<option value="${r}" ${l.relation===r?'selected':''}>${RELATION_NAMES[r]}</option>`).join('')}
+                    </select>
+                    <button class="node-item-btn del" data-action="delete-edge" data-idx="${i}" title="删除">✕</button>
+                </div>
+            `}).join('');
+        }
+
+        function openNodeForm(nodeId) {
+            const existing = document.querySelector('.graph-edit-form');
+            if (existing) existing.remove();
+
+            const listItem = document.querySelector(`.graph-node-item[data-id="${nodeId}"]`);
+            if (!listItem) return;
+            listItem.classList.add('editing');
+
+            const node = nodesData.find(n => n.id === nodeId) || {};
+            editingNodeId = nodeId;
+
+            const form = document.createElement('div');
+            form.className = 'graph-edit-form';
+            form.innerHTML = `
+                <label>名称</label>
+                <input type="text" id="edit-label" value="${node.label || ''}">
+                <label>类型</label>
+                <select id="edit-type">${NODE_TYPES.map(t => `<option value="${t}" ${node.type===t?'selected':''}>${NODE_TYPE_NAMES[t]}</option>`).join('')}</select>
+                <label>摘要</label>
+                <textarea id="edit-summary">${node.summary || ''}</textarea>
+                <label>正文</label>
+                <textarea id="edit-content">${node.content || ''}</textarea>
+                <label>触发词（逗号分隔）</label>
+                <input type="text" id="edit-triggers" value="${(node.triggers || []).join('，')}">
+                <label>标签（逗号分隔）</label>
+                <input type="text" id="edit-tags" value="${(node.tags || []).join('，')}">
+                <div class="graph-form-actions">
+                    <button class="btn-cancel" id="btn-edit-cancel">取消</button>
+                    <button class="btn-save" id="btn-edit-save">保存</button>
+                </div>
+            `;
+            listItem.after(form);
+
+            document.getElementById('btn-edit-save').addEventListener('click', async () => {
+                const data = {
+                    id: nodeId,
+                    label: document.getElementById('edit-label').value.trim(),
+                    type: document.getElementById('edit-type').value,
+                    summary: document.getElementById('edit-summary').value.trim(),
+                    content: document.getElementById('edit-content').value.trim(),
+                    triggers: document.getElementById('edit-triggers').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
+                    tags: document.getElementById('edit-tags').value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+                };
+                if (!data.label) { showToast('名称不能为空'); return; }
+                try {
+                    await apiUpsertNode(data);
+                    showToast('节点已保存');
+                    closeNodeForm();
+                    // 即时更新 3D 标签 + 数据，不重建整个场景
+                    updateNodeLabel3D(nodeId, data.label, data.type, data.summary);
+                    nodesData.forEach(n => {
+                        if (n.id === nodeId) {
+                            Object.assign(n, data);
+                        }
+                    });
+                    renderNodeList();
+                    renderEdgeList();
+                } catch (e) {
+                    showToast('保存失败: ' + e.message);
+                }
+            });
+            document.getElementById('btn-edit-cancel').addEventListener('click', closeNodeForm);
+        }
+
+        function closeNodeForm() {
+            const form = document.querySelector('.graph-edit-form');
+            if (form) form.remove();
+            editingNodeId = null;
+            document.querySelectorAll('.graph-node-item.editing').forEach(el => el.classList.remove('editing'));
+        }
+
+        async function reloadGraph() {
+            try {
+                const kgData = await loadKnowledgeGraph(currentCharacter);
+                if (kgData && kgData.nodes) {
+                    const nodes = kgData.nodes.map(n => ({
+                        ...n,
+                        inkType: getInkType(n.type),
+                        x: (Math.random() - 0.5) * 200,
+                        y: (Math.random() - 0.5) * 200,
+                        z: (Math.random() - 0.5) * 200
+                    }));
+                    const links = kgData.edges.map(e => ({
+                        source: e.source, target: e.target,
+                        value: e.relation === 'supports' ? 2 : e.relation === 'contradicts' ? 0.5 : 1,
+                        relation: e.relation, description: e.description || ''
+                    }));
+                    buildSceneFromData(nodes, links);
+                }
+                renderNodeList();
+                renderEdgeList();
+            } catch (e) {
+                showToast('图谱刷新失败: ' + e.message);
+            }
+        }
+
+        // 图谱列表事件委托
+        document.getElementById('graph-node-list').addEventListener('click', async (e) => {
+            const btn = e.target.closest('button');
+            if (!btn) return;
+            const nodeId = btn.dataset.id;
+            if (btn.dataset.action === 'edit') {
+                closeNodeForm();
+                openNodeForm(nodeId);
+            } else if (btn.dataset.action === 'delete') {
+                if (!confirm(`删除节点"${nodeId}"及其所有连线？`)) return;
+                try {
+                    await apiDeleteNode(nodeId);
+                    showToast('节点已删除');
+                    closeNodeForm();
+                    await reloadGraph();
+                } catch (err) { showToast('删除失败: ' + err.message); }
+            }
+        });
+
+        document.getElementById('graph-edge-list').addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action="delete-edge"]');
+            if (!btn) return;
+            const idx = parseInt(btn.dataset.idx);
+            const edge = linksData[idx];
+            if (!edge) return;
+            const src = edge.source?.id || edge.source;
+            const tgt = edge.target?.id || edge.target;
+            try {
+                await apiDeleteEdge(src, tgt);
+                showToast('连线已删除');
+                await reloadGraph();
+            } catch (err) { showToast('删除失败: ' + err.message); }
+        });
+
+        document.getElementById('graph-edge-list').addEventListener('change', async (e) => {
+            if (!e.target.classList.contains('edge-relation-select')) return;
+            const idx = parseInt(e.target.dataset.idx);
+            const edge = linksData[idx];
+            if (!edge) return;
+            try {
+                await apiUpsertEdge({
+                    source: edge.source?.id || edge.source,
+                    target: edge.target?.id || edge.target,
+                    relation: e.target.value
+                });
+                showToast('连线已更新');
+            } catch (err) { showToast('更新失败: ' + err.message); }
+        });
+
+        document.getElementById('graph-search').addEventListener('input', renderNodeList);
+
+        // 图谱 Tab 切换时刷新列表
+        document.querySelector('[data-tab="graph"]').addEventListener('click', () => {
+            setTimeout(() => { renderNodeList(); renderEdgeList(); }, 100);
+        });
+
+        document.getElementById('btn-add-node').addEventListener('click', () => {
+            closeNodeForm();
+            const newId = 'node_' + Date.now();
+            // 在列表顶部插入占位并打开编辑
+            nodesData.push({ id: newId, label: '新节点', type: 'concept', summary: '', content: '', triggers: [], tags: [] });
+            renderNodeList();
+            setTimeout(() => openNodeForm(newId), 50);
+        });
+
+        document.getElementById('btn-add-edge').addEventListener('click', async () => {
+            const nodeIds = Object.keys(nodeMeshes);
+            if (nodeIds.length < 2) { showToast('至少需要两个节点'); return; }
+            // 简单弹窗
+            const src = prompt('源节点 ID:\n' + nodeIds.slice(0,8).join(', ') + (nodeIds.length > 8 ? '...' : ''));
+            if (!src || !nodeMeshes[src]) { if (src) showToast('无效的源节点'); return; }
+            const tgt = prompt('目标节点 ID:\n' + nodeIds.slice(0,8).join(', ') + (nodeIds.length > 8 ? '...' : ''));
+            if (!tgt || !nodeMeshes[tgt]) { if (tgt) showToast('无效的目标节点'); return; }
+            try {
+                await apiUpsertEdge({ source: src, target: tgt, relation: 'related' });
+                showToast('连线已添加');
+                await reloadGraph();
+            } catch (err) { showToast('添加失败: ' + err.message); }
+        });
+
+        // ================= 0.3 设置 UI 绑定 =================
+        function settingsToUI() {
+            const s = currentSettings;
+            document.getElementById('set-persona-depth').value = s.character.persona_depth;
+            document.getElementById('val-persona-depth').textContent = s.character.persona_depth.toFixed(1);
+            document.getElementById('set-temperature').value = s.character.temperature;
+            document.getElementById('val-temperature').textContent = s.character.temperature.toFixed(2);
+            document.getElementById('set-creativity').value = s.character.creativity;
+            document.getElementById('val-creativity').textContent = s.character.creativity.toFixed(2);
+            // 回复长度 radio
+            document.querySelectorAll('#set-response-length .radio-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.val === s.character.response_length);
+            });
+            // 记忆
+            document.getElementById('set-retrieval-count').value = s.memory.retrieval_count;
+            document.getElementById('val-retrieval-count').textContent = s.memory.retrieval_count;
+            document.getElementById('set-relevance-threshold').value = s.memory.relevance_threshold;
+            document.getElementById('val-relevance-threshold').textContent = s.memory.relevance_threshold.toFixed(2);
+            document.getElementById('set-context-chars').value = s.memory.context_chars;
+            document.getElementById('val-context-chars').textContent = s.memory.context_chars;
+            document.getElementById('set-history-window').value = s.memory.history_window;
+            document.getElementById('val-history-window').textContent = s.memory.history_window;
+            // 声音
+            document.getElementById('set-speed').value = s.voice.speed;
+            document.getElementById('val-speed').textContent = s.voice.speed.toFixed(1);
+            document.getElementById('set-pitch').value = s.voice.pitch;
+            document.getElementById('val-pitch').textContent = s.voice.pitch;
+        }
+
+        function syncUIValues() {
+            currentSettings.character.persona_depth = parseFloat(document.getElementById('set-persona-depth').value);
+            currentSettings.character.temperature = parseFloat(document.getElementById('set-temperature').value);
+            currentSettings.character.creativity = parseFloat(document.getElementById('set-creativity').value);
+            currentSettings.memory.retrieval_count = parseInt(document.getElementById('set-retrieval-count').value);
+            currentSettings.memory.relevance_threshold = parseFloat(document.getElementById('set-relevance-threshold').value);
+            currentSettings.memory.context_chars = parseInt(document.getElementById('set-context-chars').value);
+            currentSettings.memory.history_window = parseInt(document.getElementById('set-history-window').value);
+            currentSettings.voice.speed = parseFloat(document.getElementById('set-speed').value);
+            currentSettings.voice.pitch = parseInt(document.getElementById('set-pitch').value);
+            currentSettings.voice.voice_id = document.getElementById('set-voice-id').value;
+            settingsToUI(); // refresh value labels
+        }
+
+        // Slider + radio event bindings
+        const VISUAL_SLIDER_MAP = {
+            'set-persona-depth': 'persona_depth',
+            'set-temperature': 'temperature',
+            'set-creativity': 'creativity'
+        };
+        ['set-persona-depth','set-temperature','set-creativity','set-retrieval-count',
+         'set-relevance-threshold','set-context-chars','set-history-window',
+         'set-speed','set-pitch'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', () => {
+                const valKey = id.replace('set-', 'val-');
+                const valEl = document.getElementById(valKey);
+                if (valEl) valEl.textContent = parseFloat(el.value).toFixed(el.step < 1 ? 2 : el.step < 2 ? 1 : 0);
+                // 视觉相关滑块：实时更新 3D 节点
+                const visKey = VISUAL_SLIDER_MAP[id];
+                if (visKey) {
+                    currentSettings.character[visKey] = parseFloat(el.value);
+                    updateAllNodeVisuals();
+                }
+            });
+            el.addEventListener('change', syncUIValues);
+        });
+
+        document.querySelectorAll('#set-response-length .radio-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.parentElement.querySelectorAll('.radio-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSettings.character.response_length = btn.dataset.val;
+            });
+        });
+
+        document.getElementById('set-voice-id').addEventListener('change', syncUIValues);
+
+        // 应用 / 重置
+        document.getElementById('btn-apply').addEventListener('click', async () => {
+            syncUIValues();
+            await applyAllSettings();
+        });
+        document.getElementById('btn-reset').addEventListener('click', async () => {
+            currentSettings = {
+                character: { persona_depth: 1.0, temperature: 0.7, response_length: 'medium', creativity: 0.5 },
+                memory: { retrieval_count: 2, relevance_threshold: 0.0, context_chars: 600, history_window: 30 },
+                voice: { speed: 1.0, pitch: 0, voice_id: 'default' }
+            };
+            disabledNodes = [];
+            // Re-enable all nodes visually
+            Object.values(nodeMeshes).forEach(m => m.material.uniforms.uDisabled && (m.material.uniforms.uDisabled.value = 0));
+            updateAllNodeLabels();
+            settingsToUI();
+            await applyAllSettings();
+            showToast('已重置为默认');
+        });
+
+        async function applyAllSettings() {
+            // Sync disabled nodes
+            currentSettings.knowledge = { disabled_nodes: disabledNodes };
+            try {
+                await saveSettings(currentSettings);
+                bc.postMessage({ type: 'settings-updated', settings: currentSettings, timestamp: Date.now() });
+                showToast('设置已保存');
+            } catch (e) {
+                showToast('保存失败: ' + e.message);
+            }
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('save-toast');
+            t.textContent = msg;
+            t.classList.add('visible');
+            clearTimeout(t._timeout);
+            t._timeout = setTimeout(() => t.classList.remove('visible'), 2000);
+        }
+
+        // Tab 切换
+        document.querySelectorAll('.settings-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        // FAB 开关抽屉
+        document.getElementById('fab-settings').addEventListener('click', () => {
+            document.getElementById('settings-drawer').classList.toggle('open');
+        });
+        document.getElementById('drawer-close').addEventListener('click', () => {
+            document.getElementById('settings-drawer').classList.remove('open');
+        });
+
+        // ================= 1. Three.js 场景初始化 =================
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2('#E6E2D8', 0.002);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+        camera.position.set(0, 0, 400);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setClearColor('#E6E2D8', 1);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        container.appendChild(labelRenderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxDistance = 800;
+        controls.minDistance = 50;
+
+        // ================= 2. 核心 Shader: 水墨晕染材质 =================
+        const vertexShader = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                vec4 mvPosition = modelViewMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
+                mvPosition.xyz += position;
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `;
+
+        const fragmentShader = `
+            uniform float uTime;
+            uniform vec3 uColor;
+            uniform float uHover;
+            uniform int uType;
+            uniform float uDisabled;
+            uniform float uTemperature;
+            uniform float uCreativity;
+            uniform float uPersonaDepth;
+            varying vec2 vUv;
+
+            float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+            float noise(vec2 st) {
+                vec2 i = floor(st);
+                vec2 f = fract(st);
+                float a = random(i);
+                float b = random(i + vec2(1.0, 0.0));
+                float c = random(i + vec2(0.0, 1.0));
+                float d = random(i + vec2(1.0, 1.0));
+                vec2 u = f * f * (3.0 - 2.0 * f);
+                return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+            }
+
+            void main() {
+                vec2 uv = vUv - 0.5;
+                float dist = length(uv);
+
+                // Temperature: higher → breathing edge oscillation amplitude
+                float tempAmp = uTemperature * 0.06;
+                float n = noise(uv * 10.0 + uTime * 0.2) * (0.1 + tempAmp);
+                float edge = 0.4 + n + uHover * 0.08;
+
+                float alpha = 0.0;
+                vec3 finalColor = uColor;
+
+                // Persona depth: darken colors, increase contrast
+                float depthContrast = 1.0 + uPersonaDepth * 0.5;
+                finalColor = finalColor * (1.0 - uPersonaDepth * 0.15);
+
+                if (uType == 0) {
+                    // Wet ink: wider diffusion at high temperature
+                    float diffRange = 0.2 + uHover * 0.1 + uTemperature * 0.08;
+                    alpha = smoothstep(edge, edge - diffRange, dist);
+                } else if (uType == 1) {
+                    // Dry ink: temperature sharpens the texture
+                    float dryNoise = noise(uv * (30.0 + uTemperature * 10.0));
+                    alpha = smoothstep(edge, edge - 0.02, dist) * (0.6 + 0.4 * dryNoise);
+                } else if (uType == 2) {
+                    // Accumulated ink: depth increases edge deposit
+                    alpha = smoothstep(edge, edge - 0.1, dist);
+                    if(dist > edge - 0.12 - uPersonaDepth * 0.03 && dist < edge - 0.05) {
+                        alpha += 0.3 + uPersonaDepth * 0.2;
+                        finalColor = finalColor * (0.5 - uPersonaDepth * 0.2);
+                    }
+                } else {
+                    // Broken ink: creativity = more chaotic fragmentation
+                    float crFreq = 20.0 + uCreativity * 30.0;
+                    float crTime = uTime * (0.1 + uCreativity * 0.3);
+                    float breakNoise = noise(uv * vec2(crFreq, crFreq * 0.25) + crTime);
+                    alpha = smoothstep(edge, edge - 0.15 - uCreativity * 0.05, dist);
+                    alpha *= smoothstep(0.3 + uCreativity * 0.15, 0.7 - uCreativity * 0.1, breakNoise);
+                    // Higher creativity → more visible broken texture
+                    alpha = mix(alpha, alpha * (0.6 + 0.4 * breakNoise), uCreativity);
+                }
+
+                alpha += smoothstep(0.15, 0.0, dist) * (0.5 + uPersonaDepth * 0.15);
+
+                if (uDisabled > 0.5) {
+                    alpha *= 0.18;
+                    finalColor = mix(finalColor, vec3(0.7), 0.5);
+                }
+
+                gl_FragColor = vec4(finalColor, clamp(alpha, 0.0, 1.0));
+            }
+        `;
+
+        // ================= 3. 场景对象容器 =================
+        const nodeMeshes = {};
+        const linkLines = [];
+        const geometry = new THREE.PlaneGeometry(1, 1);
+        let nodesData = [];
+        let linksData = [];
+        let simulation = null;
+
+        function clearSceneNodes() {
+            Object.values(nodeMeshes).forEach(m => {
+                scene.remove(m);
+                if (m.material) m.material.dispose();
+            });
+            linkLines.forEach(l => scene.remove(l));
+            linkLines.length = 0;
+            for (const k in nodeMeshes) delete nodeMeshes[k];
+        }
+
+        function buildSceneFromData(nodes, links) {
+            // Preserve old positions for existing nodes
+            const oldPositions = {};
+            nodesData.forEach(n => {
+                const m = nodeMeshes[n.id];
+                if (m) oldPositions[n.id] = m.position.clone();
+            });
+            clearSceneNodes();
+            nodesData = nodes;
+            linksData = links;
+
+            nodes.forEach(node => {
+                if (oldPositions[node.id]) {
+                    node.x = oldPositions[node.id].x;
+                    node.y = oldPositions[node.id].y;
+                    node.z = oldPositions[node.id].z;
+                }
+                const inkType = getInkType(node.type);
+                const isCore = node.type === 'mental_model' || node.type === 'value' || node.type === 'heuristic';
+                const colorValue = isCore ? 0.05 : 0.35;
+
+                const material = new THREE.ShaderMaterial({
+                    vertexShader,
+                    fragmentShader,
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uColor: { value: new THREE.Color(colorValue, colorValue, colorValue) },
+                        uHover: { value: 0 },
+                        uType: { value: getInkEnum(inkType) },
+                        uDisabled: { value: 0 },
+                        uTemperature: { value: currentSettings.character.temperature },
+                        uCreativity: { value: currentSettings.character.creativity },
+                        uPersonaDepth: { value: isCore ? currentSettings.character.persona_depth : currentSettings.character.persona_depth * 0.4 }
+                    },
+                    transparent: true,
+                    depthWrite: false,
+                    blending: THREE.NormalBlending
+                });
+
+                const size = (node.type === 'mental_model' || node.type === 'value') ? 35 : 18;
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.scale.set(size * 2, size * 2, 1);
+                mesh.userData = {
+                    id: node.id,
+                    label: node.label,
+                    desc: node.summary || node.content || '',
+                    seal: node.type === 'mental_model' ? '思维' : node.type === 'value' ? '价值' : node.type === 'heuristic' ? '启发' : '',
+                    type: node.type,
+                    disabled: node.disabled || false,
+                    isCore: isCore
+                };
+                scene.add(mesh);
+                nodeMeshes[node.id] = mesh;
+
+                // Label
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'node-label';
+                if (mesh.userData.seal) {
+                    labelDiv.innerHTML = `<span class="node-seal">${mesh.userData.seal}</span> ${node.label}<span class="node-toggle-icon">⚙</span>`;
+                } else {
+                    labelDiv.innerHTML = `${node.label}<span class="node-toggle-icon">⚙</span>`;
+                }
+                labelDiv.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleNodeFromLabel(node.id);
+                });
+                const label = new CSS2DObject(labelDiv);
+                label.position.set(0, size * 1.2, 0);
+                mesh.add(label);
+
+                if (node.disabled) {
+                    material.uniforms.uDisabled.value = 1.0;
+                    labelDiv.classList.add('disabled-node');
+                }
+            });
+
+            // 力导向
+            const simNodes = nodes.map(n => ({ ...n }));
+            const simLinks = links.map(l => ({
+                source: l.source,
+                target: l.target,
+                value: l.value || 1
+            }));
+
+            simulation = forceSimulation(simNodes)
+                .numDimensions(3)
+                .force('link', forceLink(simLinks).id(d => d.id).distance(80))
+                .force('charge', forceManyBody().strength(-200))
+                .force('center', forceCenter(0, 0, 0));
+
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: 0x555555,
+                transparent: true,
+                opacity: 0.25,
+                depthWrite: false,
+                blending: THREE.NormalBlending
+            });
+
+            simulation.on('tick', () => {
+                simNodes.forEach(sn => {
+                    const mesh = nodeMeshes[sn.id];
+                    if (mesh) mesh.position.set(sn.x, sn.y, sn.z);
+                });
+                linkLines.forEach(l => scene.remove(l));
+                linkLines.length = 0;
+                simLinks.forEach(link => {
+                    const src = nodeMeshes[link.source.id || link.source];
+                    const tgt = nodeMeshes[link.target.id || link.target];
+                    if (!src || !tgt) return;
+                    const pts = [src.position, tgt.position];
+                    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+                    const line = new THREE.Line(geo, lineMaterial);
+                    scene.add(line);
+                    linkLines.push(line);
+                });
+            });
+        }
+
+        // ================= 4. 节点开关 =================
+        async function toggleNodeFromLabel(nodeId) {
+            const idx = disabledNodes.indexOf(nodeId);
+            const enabling = idx !== -1;
+            try {
+                await toggleNodeAPI(nodeId, enabling);
+                if (enabling) {
+                    disabledNodes.splice(idx, 1);
+                } else {
+                    disabledNodes.push(nodeId);
+                }
+                updateNodeVisual(nodeId, !enabling);
+                currentSettings.knowledge = { disabled_nodes: disabledNodes };
+                bc.postMessage({ type: 'settings-updated', settings: currentSettings, timestamp: Date.now() });
+            } catch (e) {
+                console.warn('Toggle node API failed, using local state:', e);
+                // 本地回退
+                if (enabling) {
+                    disabledNodes.splice(idx, 1);
+                } else {
+                    disabledNodes.push(nodeId);
+                }
+                updateNodeVisual(nodeId, !enabling);
+            }
+        }
+
+        function updateNodeVisual(nodeId, disabled) {
+            const mesh = nodeMeshes[nodeId];
+            if (!mesh) return;
+            mesh.material.uniforms.uDisabled.value = disabled ? 1.0 : 0.0;
+            mesh.userData.disabled = disabled;
+            const labelObj = mesh.children[0];
+            if (labelObj && labelObj.element) {
+                labelObj.element.classList.toggle('disabled-node', disabled);
+            }
+            if (currentEditingNodeId === nodeId) {
+                updatePanelToggle(nodeId, disabled);
+            }
+        }
+
+        // 面板设置 → 3D 视觉效果实时映射
+        function updateAllNodeVisuals() {
+            const t = currentSettings.character.temperature;
+            const c = currentSettings.character.creativity;
+            const pd = currentSettings.character.persona_depth;
+
+            Object.values(nodeMeshes).forEach(mesh => {
+                const u = mesh.material.uniforms;
+                if (!u) return;
+                u.uTemperature.value = t;
+                u.uCreativity.value = c;
+                const isCore = mesh.userData.isCore || false;
+                u.uPersonaDepth.value = isCore ? pd : pd * 0.4;
+            });
+        }
+
+        // 即时更新节点 3D 标签（不重建场景）
+        function updateNodeLabel3D(nodeId, label, type, summary) {
+            const mesh = nodeMeshes[nodeId];
+            if (!mesh) return;
+            const sealMap = { mental_model: '思维', value: '价值', heuristic: '启发' };
+            const seal = sealMap[type] || '';
+            mesh.userData.label = label;
+            mesh.userData.type = type;
+            mesh.userData.seal = seal;
+            mesh.userData.desc = summary || mesh.userData.desc;
+            const labelObj = mesh.children[0];
+            if (labelObj && labelObj.element) {
+                if (seal) {
+                    labelObj.element.innerHTML = `<span class="node-seal">${seal}</span> ${label}<span class="node-toggle-icon">⚙</span>`;
+                } else {
+                    labelObj.element.innerHTML = `${label}<span class="node-toggle-icon">⚙</span>`;
+                }
+                // Re-bind click
+                labelObj.element.querySelector('.node-toggle-icon').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleNodeFromLabel(nodeId);
+                });
+                if (mesh.userData.disabled || disabledNodes.includes(nodeId)) {
+                    labelObj.element.classList.add('disabled-node');
+                }
+            }
+        }
+
+        function updateAllNodeLabels() {
+            nodesData.forEach(n => {
+                const mesh = nodeMeshes[n.id];
+                if (mesh) {
+                    const d = disabledNodes.includes(n.id);
+                    mesh.material.uniforms.uDisabled.value = d ? 1.0 : 0.0;
+                    mesh.userData.disabled = d;
+                    const labelObj = mesh.children[0];
+                    if (labelObj && labelObj.element) {
+                        labelObj.element.classList.toggle('disabled-node', d);
+                    }
+                }
+            });
+        }
+
+        function updatePanelToggle(nodeId, disabled) {
+            const stamp = document.getElementById('toggle-stamp');
+            const area = document.getElementById('node-toggle-area');
+            if (area) {
+                area.style.display = 'flex';
+                stamp.textContent = disabled ? '禁' : '启';
+                stamp.className = 'toggle-stamp ' + (disabled ? 'off' : 'on');
+                area.onclick = async (e) => {
+                    e.stopPropagation();
+                    await toggleNodeFromLabel(nodeId);
+                };
+            }
+        }
+
+        // ================= 5. 交互系统 =================
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let hoveredMesh = null;
+
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(Object.values(nodeMeshes));
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if (hoveredMesh !== object) {
+                    if (hoveredMesh) gsap.to(hoveredMesh.material.uniforms.uHover, { value: 0, duration: 0.5 });
+                    hoveredMesh = object;
+                    gsap.to(hoveredMesh.material.uniforms.uHover, { value: 1.0, duration: 0.5 });
+                    document.body.style.cursor = 'pointer';
+                }
+            } else {
+                if (hoveredMesh) {
+                    gsap.to(hoveredMesh.material.uniforms.uHover, { value: 0, duration: 0.5 });
+                    hoveredMesh = null;
+                    document.body.style.cursor = 'default';
+                }
+            }
+        });
+
+        // 侧栏面板
+        const sidePanel = document.getElementById('side-panel');
+        const pName = document.getElementById('panel-name');
+        const pDesc = document.getElementById('panel-desc');
+        const pSeal = document.getElementById('panel-seal');
+
+        window.addEventListener('click', () => {
+            if (hoveredMesh) {
+                const data = hoveredMesh.userData;
+                currentEditingNodeId = data.id;
+                pName.innerHTML = `${data.label} <span class="seal-large">${data.seal || '印'}</span>`;
+                pDesc.innerHTML = data.desc;
+                sidePanel.classList.add('open');
+                updatePanelToggle(data.id, data.disabled || disabledNodes.includes(data.id));
+            }
+        });
+
+        document.getElementById('btn-close').addEventListener('click', (e) => {
+            sidePanel.classList.remove('open');
+            currentEditingNodeId = null;
+            gsap.to(camera.position, { x: 0, y: 0, z: 400, duration: 2, ease: "power2.inOut" });
+            gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 2, ease: "power2.inOut" });
+            e.stopPropagation();
+        });
+
+        // 双击聚焦
+        window.addEventListener('dblclick', () => {
+            if (hoveredMesh) {
+                const pos = hoveredMesh.position;
+                gsap.to(camera.position, { x: pos.x, y: pos.y, z: pos.z + 100, duration: 1.5, ease: "power3.inOut" });
+                gsap.to(controls.target, { x: pos.x, y: pos.y, z: pos.z, duration: 1.5, ease: "power3.inOut" });
+            }
+        });
+
+        // 搜索
+        const searchBox = document.getElementById('search-box');
+        searchBox.addEventListener('input', () => {
+            const q = searchBox.value.trim().toLowerCase();
+            Object.values(nodeMeshes).forEach(m => {
+                const label = (m.userData.label || '').toLowerCase();
+                const desc = (m.userData.desc || '').toLowerCase();
+                const match = !q || label.includes(q) || desc.includes(q);
+                m.visible = match;
+                m.children.forEach(c => { if (c.element) c.element.style.display = match ? '' : 'none'; });
+            });
+            // 隐藏不匹配的连线（简化：全部隐藏，匹配节点间的显示）
+            linkLines.forEach(l => { l.visible = !q; });
+            if (!q) linkLines.forEach(l => { l.visible = true; });
+        });
+
+        // ================= 6. 渲染循环 =================
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            Object.values(nodeMeshes).forEach(mesh => {
+                if (mesh.material.uniforms) mesh.material.uniforms.uTime.value = time;
+            });
+            Object.values(nodeMeshes).forEach(mesh => {
+                const dist = camera.position.distanceTo(mesh.position);
+                const labelObj = mesh.children[0];
+                if (!labelObj || !labelObj.element) return;
+                const label = labelObj.element;
+                if (dist > 300) {
+                    label.style.opacity = mesh.userData.seal ? '0.5' : '0';
+                    label.style.fontSize = '12px';
+                } else {
+                    label.style.opacity = '1';
+                    label.style.fontSize = '16px';
+                }
+            });
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+
+        // ================= 7. 窗口适配 =================
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ================= 8. BroadcastChannel 监听 =================
+        bc.onmessage = (ev) => {
+            if (ev.data.type === 'settings-updated' && ev.data.settings) {
+                currentSettings = ev.data.settings;
+                disabledNodes = currentSettings.knowledge?.disabled_nodes || [];
+                updateAllNodeLabels();
+                settingsToUI();
+                showToast('聊天页设置已同步');
+            }
+            if (ev.data.type === 'request-sync') {
+                bc.postMessage({ type: 'settings-updated', settings: currentSettings, timestamp: Date.now() });
+            }
+        };
+
+        // ================= 9. 初始化 =================
+        (async function init() {
+            const loader = document.getElementById('loader');
+            const loaderText = loader.querySelector('.loader-text');
+
+            // 并行加载设置和知识图谱
+            const results = await Promise.allSettled([
+                loadSettings(),
+                loadKnowledgeGraph(currentCharacter),
+                fetchVoiceProfiles()
+            ]);
+
+            // 处理设置
+            if (results[0].status === 'fulfilled' && results[0].value) {
+                currentSettings = results[0].value;
+                disabledNodes = currentSettings.knowledge?.disabled_nodes || [];
+                settingsToUI();
+            }
+
+            // 处理知识图谱
+            let kgData = null;
+            if (results[1].status === 'fulfilled' && results[1].value) {
+                kgData = results[1].value;
+            }
+
+            if (kgData && kgData.nodes && kgData.nodes.length > 0) {
+                // 从后端加载
+                const nodes = kgData.nodes.map(n => ({
+                    ...n,
+                    inkType: getInkType(n.type),
+                    x: (Math.random() - 0.5) * 200,
+                    y: (Math.random() - 0.5) * 200,
+                    z: (Math.random() - 0.5) * 200
+                }));
+                const links = kgData.edges.map(e => ({
+                    source: e.source,
+                    target: e.target,
+                    value: e.relation === 'supports' ? 2 : e.relation === 'contradicts' ? 0.5 : 1
+                }));
+                buildSceneFromData(nodes, links);
+                searchBox.placeholder = `寻章...（${nodes.length}节点）`;
+            } else {
+                // 回退：后端不可用时生成演示数据
+                loaderText.textContent = '后端未连接，生成演示图谱...';
+                const fallbackNodes = [
+                    { id: 'core_1', type: 'mental_model', label: '吸引力原则', summary: '没人会因为喜欢他而喜欢你', content: '', triggers: [], tags: [], disabled: false, inkType: 'dry', x: (Math.random()-0.5)*200, y: (Math.random()-0.5)*200, z: (Math.random()-0.5)*200 },
+                    { id: 'core_2', type: 'heuristic', label: '给台阶', summary: '给他一个能说服自己的理由', content: '', triggers: [], tags: [], disabled: false, inkType: 'wet', x: (Math.random()-0.5)*200, y: (Math.random()-0.5)*200, z: (Math.random()-0.5)*200 },
+                    { id: 'core_3', type: 'mental_model', label: '框架思维', summary: '谁制定规则谁掌控局面', content: '', triggers: [], tags: [], disabled: false, inkType: 'dry', x: (Math.random()-0.5)*200, y: (Math.random()-0.5)*200, z: (Math.random()-0.5)*200 },
+                    { id: 'core_4', type: 'value', label: '真诚', summary: '套路千变万化，真诚是底牌', content: '', triggers: [], tags: [], disabled: false, inkType: 'accumulated', x: (Math.random()-0.5)*200, y: (Math.random()-0.5)*200, z: (Math.random()-0.5)*200 },
+                ];
+                const fallbackLinks = [
+                    { source: 'core_1', target: 'core_2', value: 1 },
+                    { source: 'core_1', target: 'core_3', value: 2 },
+                    { source: 'core_2', target: 'core_4', value: 1 },
+                ];
+                buildSceneFromData(fallbackNodes, fallbackLinks);
+                searchBox.placeholder = '寻章...（演示数据）';
+            }
+
+            // 启动渲染
+            loaderText.textContent = '展开长卷...';
+            setTimeout(() => {
+                loader.style.opacity = 0;
+                setTimeout(() => loader.remove(), 1000);
+                animate();
+            }, 800);
+
+            // 请求聊天页同步（如果聊天页已打开）
+            bc.postMessage({ type: 'request-sync' });
+
+            console.log(`[水墨] 已加载 ${nodesData.length} 节点, ${linksData.length} 连线`);
+            console.log(`[水墨] 设置面板就绪 — 角色/记忆/声音/图谱编辑`);
+            console.log(`[水墨] BroadcastChannel: ${BROADCAST_CHANNEL}`);
+
+            // 初始渲染编辑器列表
+            renderNodeList();
+            renderEdgeList();
+        })();
+    </script>
+</body>
+</html>

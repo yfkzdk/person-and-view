@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuroVoice — 深海神经语音</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23020814' stroke='%236A9CBA' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%2300E5FF' opacity='0.5'/%3E%3C/svg%3E">
+    <style>
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: linear-gradient(
+                180deg,
+                #0D3B52 0%,
+                #0A1F38 25%,
+                #061428 55%,
+                #020A14 100%
+            );
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 1;
+            animation: fluidColorShift 20s infinite alternate ease-in-out;
+        }
+        @keyframes fluidColorShift {
+            0%   { filter: hue-rotate(0deg) contrast(1.1); }
+            100% { filter: hue-rotate(15deg) contrast(1.0); }
+        }
+
+        /* ---- UI overlay ---- */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            padding-bottom: 10%;
+        }
+
+        /* ---- Synapse mic ---- */
+        #synapse-mic {
+            width: 60px; height: 60px;
+            background: radial-gradient(circle at 30% 30%, rgba(138,172,214,0.4), rgba(42,75,108,0.8));
+            border: 2px solid rgba(138,172,214,0.5);
+            border-radius: 43% 57% 61% 39% / 51% 41% 59% 49%;
+            pointer-events: auto;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(74,107,140,0.5), inset 0 0 15px rgba(138,172,214,0.5);
+            transition: all 0.6s cubic-bezier(0.4,0,0.2,1);
+            animation: breathe 4s infinite ease-in-out;
+            position: relative;
+            z-index: 11;
+        }
+        #synapse-mic::before, #synapse-mic::after {
+            content: '';
+            position: absolute;
+            background: rgba(138,172,214,0.3);
+            border-radius: 50%;
+            filter: blur(4px);
+            z-index: -1;
+            transition: all 0.8s;
+        }
+        #synapse-mic::before { width: 120px; height: 4px; top: 50%; left: -140px; transform: rotate(15deg); opacity: 0; }
+        #synapse-mic::after  { width: 120px; height: 4px; top: 50%; right: -140px; transform: rotate(-15deg); opacity: 0; }
+        #synapse-mic.recording {
+            transform: scale(1.1);
+            border-radius: 51% 49% 38% 62% / 40% 59% 41% 60%;
+            box-shadow: 0 0 40px rgba(138,172,214,0.8), inset 0 0 25px rgba(255,255,255,0.6);
+            background: radial-gradient(circle at 50% 50%, rgba(138,172,214,0.6), rgba(42,75,108,0.9));
+        }
+        #synapse-mic.recording::before,
+        #synapse-mic.recording::after { opacity: 1; }
+        #synapse-mic.processing {
+            animation: pulseFast 0.6s infinite ease-in-out;
+            box-shadow: 0 0 50px rgba(138,172,214,1), inset 0 0 20px rgba(255,255,255,0.5);
+        }
+        @keyframes breathe {
+            0%,100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        @keyframes pulseFast {
+            0%,100% { transform: scale(1); box-shadow: 0 0 30px rgba(138,172,214,0.6); }
+            50% { transform: scale(1.08); box-shadow: 0 0 60px rgba(200,220,255,1); }
+        }
+
+        /* ---- Dialogue wrappers (positioning + animation) ---- */
+        .dialogue-wrapper {
+            position: absolute;
+            bottom: 18%;
+            pointer-events: none;
+            opacity: 0;
+            transform-origin: center;
+            z-index: 15;
+        }
+        #wrapper-left  { left: 50%; }
+        #wrapper-right { right: 50%; }
+
+        /* ---- Outer bubble shell (菲涅尔折射感) ---- */
+        .dialogue-bubble {
+            background: radial-gradient(circle at 20% 20%, rgba(200,220,255,0.15) 0%, rgba(15,25,50,0.45) 60%, rgba(5,10,25,0.6) 100%);
+            backdrop-filter: blur(12px) brightness(1.1);
+            -webkit-backdrop-filter: blur(12px) brightness(1.1);
+            border: 1px solid rgba(200,220,255,0.3);
+            padding: 22px 35px;
+            border-radius: 40px 40px 40px 5px;
+            box-shadow:
+                inset 5px 5px 15px rgba(255,255,255,0.15),
+                inset -5px -5px 20px rgba(0,0,0,0.5),
+                0 15px 35px rgba(0,0,0,0.6),
+                0 0 10px rgba(138,172,214,0.2);
+            transform-origin: bottom right;
+            transition:
+                all 0.4s cubic-bezier(0.175,0.885,0.32,1.275),
+                color 0.8s ease,
+                text-shadow 0.8s ease,
+                border-color 0.8s ease,
+                box-shadow 0.8s ease;
+            /* Emotion-driven CSS variables */
+            --emo-r: 226; --emo-g: 240; --emo-b: 249;
+            --glow-r: 138; --glow-g: 172; --glow-b: 214;
+            --glow-intensity: 0.4;
+        }
+        #wrapper-right .dialogue-bubble {
+            border-radius: 40px 40px 5px 40px;
+            transform-origin: bottom left;
+        }
+        /* Emotion active state — multi-layer glow */
+        .dialogue-bubble.emotion-active {
+            color: rgb(var(--emo-r), var(--emo-g), var(--emo-b));
+            text-shadow:
+                0 0 8px  rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.9)),
+                0 0 18px rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.5)),
+                0 0 36px rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.2)),
+                0 0 60px rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.08));
+            border-color: rgba(var(--glow-r), var(--glow-g), var(--glow-b), 0.5);
+            box-shadow:
+                inset 5px 5px 15px rgba(255,255,255,0.15),
+                inset -5px -5px 20px rgba(0,0,0,0.5),
+                0 15px 35px rgba(0,0,0,0.6),
+                0 0 40px rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.25));
+        }
+
+        /* ---- Inner text ---- */
+        .dialogue-text {
+            color: #E2F0F9;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.8px;
+            line-height: 1.7;
+            text-align: left;
+            word-break: break-word;
+            transition: color 0.8s ease, text-shadow 0.8s ease;
+        }
+        .dialogue-bubble.emotion-active .dialogue-text {
+            text-shadow:
+                0 0 8px  rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.7)),
+                0 0 18px rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.35)),
+                0 0 36px rgba(var(--glow-r), var(--glow-g), var(--glow-b), calc(var(--glow-intensity) * 0.12));
+        }
+
+        /* ---- Dissolving animation ---- */
+        .dialogue-wrapper.dissolving .dialogue-bubble {
+            animation: bubbleBurst 0.5s forwards ease-in;
+        }
+        .dialogue-wrapper.dissolving .dialogue-text {
+            animation: textLiquify 0.5s forwards ease-in;
+        }
+        @keyframes bubbleBurst {
+            0%   { transform: scale(1); opacity: 1; border-radius: 40px; }
+            40%  { transform: scale(1.1) translateY(-10px); opacity: 0.8; border-radius: 50% 30% 60% 40%; filter: brightness(1.5); }
+            100% { transform: scale(1.3) translateY(-20px); opacity: 0; border-radius: 50%; filter: blur(8px); }
+        }
+        @keyframes textLiquify {
+            0%   { filter: blur(0px); opacity: 1; transform: scale(1); }
+            100% { filter: blur(12px); opacity: 0; transform: scale(0.8) translateY(-20px); }
+        }
+
+        /* ---- Text input ---- */
+        #text-input-wrap {
+            position: absolute;
+            bottom: 6%;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: auto;
+            opacity: 0;
+            transition: opacity 0.4s;
+            z-index: 12;
+        }
+        #text-input-wrap.visible { opacity: 1; }
+        #text-input {
+            background: rgba(10,25,45,0.85);
+            border: 1px solid rgba(138,172,214,0.4);
+            color: #C0D6E4;
+            padding: 10px 16px;
+            font-size: 14px;
+            width: 280px;
+            border-radius: 22px 8px 22px 12px;
+            outline: none;
+            backdrop-filter: blur(6px);
+            letter-spacing: 1px;
+        }
+        #text-input::placeholder { color: rgba(138,172,214,0.4); }
+
+        /* ---- Status line ---- */
+        #status-line {
+            position: absolute;
+            top: 20px; right: 24px;
+            color: rgba(138,172,214,0.6);
+            font-size: 11px;
+            letter-spacing: 2px;
+            z-index: 10;
+            pointer-events: none;
+            transition: color 0.5s;
+        }
+        #status-line.error { color: rgba(255,120,100,0.8); }
+
+        /* ---- Interim text ---- */
+        #interim-text {
+            position: absolute;
+            bottom: 24%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(138,172,214,0.5);
+            font-size: 13px;
+            letter-spacing: 1px;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        #interim-text.visible { opacity: 1; }
+
+        /* ---- Hint ---- */
+        #hint {
+            position: absolute;
+            top: 40px;
+            width: 100%;
+            text-align: center;
+            color: rgba(138,172,214,0.4);
+            font-size: 11px;
+            letter-spacing: 2px;
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 0.8s;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+</head>
+<body>
+
+<div id="hint">点击突触节点开始对话 · 或直接输入文字</div>
+<div id="canvas-container"></div>
+<div id="status-line">● 离线</div>
+<div id="interim-text"></div>
+
+<div id="ui-layer">
+    <div id="wrapper-left" class="dialogue-wrapper">
+        <div class="dialogue-bubble">
+            <div class="dialogue-text"></div>
+        </div>
+    </div>
+    <div id="synapse-mic"></div>
+    <div id="wrapper-right" class="dialogue-wrapper">
+        <div class="dialogue-bubble">
+            <div class="dialogue-text"></div>
+        </div>
+    </div>
+    <div id="text-input-wrap">
+        <input id="text-input" type="text" placeholder="输入消息..." autocomplete="off">
+    </div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    // ==================== CONFIG ====================
+    const WS_PORT = parseInt(new URLSearchParams(location.search).get('port') || '8765', 10);
+    const WS_URL  = `ws://localhost:${WS_PORT}`;
+
+    // ==================== DOM REFS ====================
+    const container   = document.getElementById('canvas-container');
+    const mic         = document.getElementById('synapse-mic');
+    const wLeft       = document.getElementById('wrapper-left');
+    const wRight      = document.getElementById('wrapper-right');
+    const dLeftText   = wLeft.querySelector('.dialogue-text');
+    const dRightText  = wRight.querySelector('.dialogue-text');
+    const dLeftBubble = wLeft.querySelector('.dialogue-bubble');
+    const dRightBubble= wRight.querySelector('.dialogue-bubble');
+    const hint        = document.getElementById('hint');
+    const statusLine  = document.getElementById('status-line');
+    const interimText = document.getElementById('interim-text');
+    const textWrap    = document.getElementById('text-input-wrap');
+    const textInput   = document.getElementById('text-input');
+
+    // ==================== SESSION ====================
+    let sessionId = localStorage.getItem('nv_session_id');
+    if (!sessionId) {
+        sessionId = 'nv_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
+        localStorage.setItem('nv_session_id', sessionId);
+    }
+
+    // ==================== STATE ====================
+    let ws = null;
+    let isConnected = false;
+    let isRecording = false;
+    let isProcessing = false;
+    let currentEmotionWeights = { neutral: 1, happy: 0, calm: 0, sad: 0, angry: 0, excited: 0, tense: 0 };
+    let audioFormat = 'mp3';
+    let audioChunks = [];
+    let currentAudio = null;
+    let speechRecognition = null;
+    let dissolveTimer = null;
+    let hintTimer = null;
+
+    // ==================== THREE.JS SETUP ====================
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x061428, 0.03);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 25);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.physicallyCorrectLights = true;
+    container.appendChild(renderer.domElement);
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x2A4B6C, 2);
+    scene.add(ambientLight);
+
+    const coreLight = new THREE.PointLight(0x8AACD6, 5, 20);
+    coreLight.position.set(0, 5, 2);
+    scene.add(coreLight);
+    coreLight.userData = { baseIntensity: 5, baseColor: new THREE.Color(0x8AACD6) };
+
+    const bottomLight = new THREE.PointLight(0x4A6B8C, 4, 30);
+    bottomLight.position.set(0, -10, 5);
+    scene.add(bottomLight);
+
+    // ---- Vascular bump map generator ----
+    function createVascularBumpMap() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1024, 512);
+        ctx.strokeStyle = '#fff'; ctx.lineCap = 'round';
+
+        const trunks = [];
+        for (let i = 0; i < 9; i++) {
+            const bx = 40 + i * 110 + (Math.random() - 0.5) * 40;
+            const cp1x = bx + (Math.random() - 0.5) * 100;
+            const cp2x = bx + (Math.random() - 0.5) * 100;
+            const ex = bx + (Math.random() - 0.5) * 60;
+            trunks.push({ bx, cp1x, cp2x, ex });
+            ctx.lineWidth = 3 + Math.random() * 5;
+            ctx.beginPath();
+            ctx.moveTo(bx, -5);
+            ctx.bezierCurveTo(cp1x, 128, cp2x, 384, ex, 517);
+            ctx.stroke();
+        }
+
+        trunks.forEach(t => {
+            for (let b = 0; b < 4; b++) {
+                const tp = 0.15 + b * 0.22;
+                const sx = Math.pow(1-tp,3)*t.bx + 3*Math.pow(1-tp,2)*tp*t.cp1x + 3*(1-tp)*tp*tp*t.cp2x + Math.pow(tp,3)*t.ex;
+                const sy = tp * 512;
+                ctx.lineWidth = 1 + Math.random() * 2;
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                const dx = sx + (Math.random() > 0.5 ? 1 : -1) * (30 + Math.random() * 80);
+                const dy = sy + (Math.random() - 0.5) * 80;
+                ctx.quadraticCurveTo(sx + (dx - sx) * 0.5, sy - 20, dx, dy);
+                ctx.stroke();
+            }
+        });
+
+        for (let j = 0; j < 7; j++) {
+            const by = 30 + j * 75 + (Math.random() - 0.5) * 20;
+            ctx.lineWidth = 1.5 + Math.random() * 2.5;
+            ctx.beginPath();
+            ctx.moveTo(0, by);
+            for (let x = 0; x <= 1024; x += 30) {
+                ctx.lineTo(x, by + Math.sin(x * 0.018 + j * 1.5) * 12 + Math.sin(x * 0.037) * 6);
+            }
+            ctx.stroke();
+        }
+
+        ctx.globalAlpha = 0.35;
+        for (let k = 0; k < 200; k++) {
+            ctx.lineWidth = 0.5 + Math.random() * 0.8;
+            ctx.beginPath();
+            const cx = Math.random() * 1024, cy = Math.random() * 512;
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + (Math.random()-0.5)*50, cy + (Math.random()-0.5)*50);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        return texture;
+    }
+
+    // ---- Mother group ----
+    const motherGroup = new THREE.Group();
+    motherGroup.position.y = 4;
+    scene.add(motherGroup);
+
+    const organicMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x2A4B6C, emissive: 0x0A1528,
+        roughness: 0.2, metalness: 0.1,
+        transmission: 0.9, thickness: 1.5,
+        wireframe: true, transparent: true, opacity: 0.8
+    });
+
+    // Inner core
+    const coreGeo = new THREE.SphereGeometry(2.5, 32, 32);
+    const coreMat = new THREE.MeshBasicMaterial({
+        color: 0x4A6B8C, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending
+    });
+    const innerCore = new THREE.Mesh(coreGeo, coreMat);
+    motherGroup.add(innerCore);
+    innerCore.userData = { baseOpacity: 0.4 };
+
+    // Vascular shell
+    const vascularBumpMap = createVascularBumpMap();
+    const shellGeo = new THREE.SphereGeometry(2.75, 64, 32);
+    const shellMat = new THREE.MeshPhysicalMaterial({
+        color: 0x5A7A8E, roughness: 0.35, metalness: 0.05,
+        transmission: 0.4, thickness: 2.5,
+        bumpMap: vascularBumpMap, bumpScale: 0.06,
+        transparent: true, opacity: 0.72, side: THREE.FrontSide
+    });
+    const shell = new THREE.Mesh(shellGeo, shellMat);
+    motherGroup.add(shell);
+
+    // Fresnel rim light
+    const rimGeo = new THREE.SphereGeometry(2.85, 48, 24);
+    const rimMat = new THREE.ShaderMaterial({
+        uniforms: {
+            uColor: { value: new THREE.Color(0x6A9CBA) },
+            uFresnelPower: { value: 2.5 }
+        },
+        vertexShader: `
+            varying vec3 vNormal;
+            varying vec3 vViewDir;
+            void main() {
+                vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                vNormal = normalize(mat3(modelMatrix) * normal);
+                vViewDir = normalize(cameraPosition - worldPos.xyz);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vNormal;
+            varying vec3 vViewDir;
+            uniform vec3 uColor;
+            uniform float uFresnelPower;
+            void main() {
+                float fresnel = 1.0 - abs(dot(vNormal, vViewDir));
+                fresnel = pow(fresnel, uFresnelPower);
+                gl_FragColor = vec4(uColor, fresnel * 0.45);
+            }
+        `,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    const rimLight = new THREE.Mesh(rimGeo, rimMat);
+    motherGroup.add(rimLight);
+
+    // Halo sprite
+    const haloCanvas = document.createElement('canvas');
+    haloCanvas.width = 256; haloCanvas.height = 256;
+    const haloCtx = haloCanvas.getContext('2d');
+    const haloGrad = haloCtx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    haloGrad.addColorStop(0, 'rgba(0,229,255,0.45)');
+    haloGrad.addColorStop(0.2, 'rgba(0,200,240,0.20)');
+    haloGrad.addColorStop(0.5, 'rgba(0,140,200,0.04)');
+    haloGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    haloCtx.fillStyle = haloGrad;
+    haloCtx.fillRect(0, 0, 256, 256);
+    const haloTexture = new THREE.CanvasTexture(haloCanvas);
+    const haloMat = new THREE.SpriteMaterial({
+        map: haloTexture, blending: THREE.AdditiveBlending,
+        transparent: true, opacity: 0, depthWrite: false
+    });
+    const halo = new THREE.Sprite(haloMat);
+    halo.scale.set(7, 7, 1);
+    motherGroup.add(halo);
+
+    // Torus knots
+    for (let i = 0; i < 4; i++) {
+        const knotGeo = new THREE.TorusKnotGeometry(
+            4 + Math.random(), 0.8, 128, 16,
+            Math.floor(Math.random() * 3) + 2,
+            Math.floor(Math.random() * 4) + 3
+        );
+        const knot = new THREE.Mesh(knotGeo, organicMaterial);
+        knot.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+        knot.userData = { baseScale: knot.scale.clone(), animSpeed: 0.005 + Math.random() * 0.005 };
+        motherGroup.add(knot);
+    }
+
+    // ---- Jellyfish microbes ----
+    const microbes = [];
+    const microbeCount = 120;
+    for (let i = 0; i < microbeCount; i++) {
+        const jellyGroup = new THREE.Group();
+
+        const domeGeo = new THREE.SphereGeometry(0.15, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+        const domeMat = new THREE.MeshBasicMaterial({ color: 0x8AACD6, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending });
+        const dome = new THREE.Mesh(domeGeo, domeMat);
+        dome.rotation.x = Math.PI / 2;
+        jellyGroup.add(dome);
+
+        const tentacleGeo = new THREE.CylinderGeometry(0.01, 0.002, 0.4, 3);
+        tentacleGeo.translate(0, -0.2, 0);
+        const tentacleMat = new THREE.MeshBasicMaterial({ color: 0x6A8CA6, transparent: true, opacity: 0.5 });
+        const tentacles = [];
+        for (let t = 0; t < 4; t++) {
+            const tentacle = new THREE.Mesh(tentacleGeo, tentacleMat);
+            tentacle.position.set((Math.random() - 0.5) * 0.1, 0, (Math.random() - 0.5) * 0.1);
+            tentacles.push(tentacle);
+            dome.add(tentacle);
+        }
+
+        jellyGroup.userData = {
+            angle: Math.random() * Math.PI * 2,
+            baseRadiusX: 12 + Math.random() * 15, baseRadiusZ: 8 + Math.random() * 10,
+            currentRadiusX: 12, currentRadiusZ: 8,
+            yOffset: (Math.random() - 0.5) * 12,
+            phase: Math.random() * Math.PI * 2,
+            tentacles: tentacles, dome: dome,
+            baseSpeed: 0.001 + Math.random() * 0.001, currentSpeed: 0
+        };
+        jellyGroup.userData.currentRadiusX = jellyGroup.userData.baseRadiusX;
+        jellyGroup.userData.currentRadiusZ = jellyGroup.userData.baseRadiusZ;
+        jellyGroup.userData.currentSpeed = jellyGroup.userData.baseSpeed;
+
+        scene.add(jellyGroup);
+        microbes.push(jellyGroup);
+    }
+
+    // ---- Background particles ----
+    const particlesGeo = new THREE.BufferGeometry();
+    const particleCount = 300;
+    const posArray = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount * 3; i++) {
+        posArray[i] = (Math.random() - 0.5) * 40;
+    }
+    particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    const particlesMat = new THREE.PointsMaterial({
+        size: 0.15, color: 0x2A4B6C, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending
+    });
+    const particleSystem = new THREE.Points(particlesGeo, particlesMat);
+    scene.add(particleSystem);
+
+    // ---- Bubble system textures ----
+    const bubbleCanvas = document.createElement('canvas');
+    bubbleCanvas.width = 64; bubbleCanvas.height = 64;
+    const bCtx = bubbleCanvas.getContext('2d');
+    const bGrad = bCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    bGrad.addColorStop(0, 'rgba(200,235,255,0.18)');
+    bGrad.addColorStop(0.30, 'rgba(160,220,245,0.35)');
+    bGrad.addColorStop(0.60, 'rgba(90,170,220,0.55)');
+    bGrad.addColorStop(0.85, 'rgba(40,110,170,0.20)');
+    bGrad.addColorStop(1, 'rgba(0,40,80,0)');
+    bCtx.fillStyle = bGrad; bCtx.fillRect(0, 0, 64, 64);
+    bCtx.beginPath(); bCtx.arc(20, 20, 10, 0, Math.PI * 2);
+    bCtx.fillStyle = 'rgba(255,255,255,0.30)'; bCtx.fill();
+    const bubbleTex = new THREE.CanvasTexture(bubbleCanvas);
+
+    const dropCanvas = document.createElement('canvas');
+    dropCanvas.width = 16; dropCanvas.height = 16;
+    const dCtx = dropCanvas.getContext('2d');
+    const dGrad = dCtx.createRadialGradient(8, 8, 0, 8, 8, 8);
+    dGrad.addColorStop(0, 'rgba(190,230,255,0.8)');
+    dGrad.addColorStop(0.5, 'rgba(100,180,230,0.3)');
+    dGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    dCtx.fillStyle = dGrad; dCtx.fillRect(0, 0, 16, 16);
+    const dropletTex = new THREE.CanvasTexture(dropCanvas);
+
+    const bubbleGeo = new THREE.PlaneGeometry(1, 1);
+    const dropletGeo = new THREE.PlaneGeometry(1, 1);
+    const bubbleMat = new THREE.MeshBasicMaterial({
+        map: bubbleTex, blending: THREE.AdditiveBlending,
+        transparent: true, opacity: 0.75, depthWrite: false
+    });
+    const dropletMat = new THREE.MeshBasicMaterial({
+        map: dropletTex, blending: THREE.AdditiveBlending,
+        transparent: true, opacity: 0.7, depthWrite: false
+    });
+
+    const bubbles = [];
+    const bubbleParticles = [];
+    let bubbleSpawnTimer = 0;
+    const bubbleSpawnBase = 0.12;
+
+    function spawnBubble() {
+        const mat = bubbleMat.clone();
+        const mesh = new THREE.Mesh(bubbleGeo, mat);
+        const baseR = 0.25 + Math.random() * 0.45;
+        mesh.scale.set(baseR, baseR, 1);
+        mesh.position.set(
+            (Math.random() - 0.5) * 20,
+            -9 - Math.random() * 2,
+            (Math.random() - 0.5) * 6
+        );
+        mesh.userData = {
+            baseRadius: baseR,
+            speed: 2.5 + Math.random() * 3.5,
+            wAmp1: 0.3 + Math.random() * 0.6, wAmp2: 0.1 + Math.random() * 0.3,
+            wFreq1: 1.2 + Math.random() * 1.8, wFreq2: 2.5 + Math.random() * 2.5,
+            wPhase: Math.random() * Math.PI * 2,
+            spawnX: mesh.position.x, startY: mesh.position.y,
+            state: 'rising', squishTimer: 0, squishDur: 0.22 + Math.random() * 0.18
+        };
+        scene.add(mesh);
+        bubbles.push(mesh);
+    }
+
+    function burstBubble(bubble) {
+        const pos = bubble.position;
+        const count = 8 + Math.floor(Math.random() * 8);
+        for (let i = 0; i < count; i++) {
+            const pm = dropletMat.clone();
+            const p = new THREE.Mesh(dropletGeo, pm);
+            p.position.copy(pos);
+            const angle = Math.random() * Math.PI * 2;
+            const spd = 0.4 + Math.random() * 1.3;
+            p.userData = {
+                vx: Math.cos(angle) * spd,
+                vy: Math.sin(angle) * spd + Math.random() * 0.5,
+                vz: (Math.random() - 0.5) * 0.7,
+                life: 0.5 + Math.random() * 0.3, age: 0
+            };
+            const ps = 0.018 + Math.random() * 0.038;
+            p.scale.set(ps, ps, 1);
+            scene.add(p);
+            bubbleParticles.push(p);
+        }
+        scene.remove(bubble);
+    }
+
+    // ---- Spring-damper viscoelastic state ----
+    const springState = {
+        coreDisp: 0, coreVel: 0, shellDisp: 0, shellVel: 0,
+        breathPhase: 0, noisePhase: 0,
+        targetRate: 1.256, currentRate: 1.256,
+        coreScaleXY: 1.0, coreScaleZ: 1.0,
+        shellScaleXY: 1.0, shellScaleZ: 1.0,
+    };
+    const SPRING = {
+        coreK: 8.0, coreDamp: 5.5,
+        shellK: 50.0, shellDamp: 13.0,
+        overshootLimit: 0.04, noiseAmp: 0.025,
+    };
+    const coreBreathAmp = 0.08;
+    const shellBreathAmp = 0.025;
+    let rippleRecoveryTween = null;
+
+    // ---- 1D organic noise ----
+    function hash1D(n) {
+        const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+        return x - Math.floor(x);
+    }
+    function smoothNoise1D(x) {
+        const i = Math.floor(x);
+        const f = x - i;
+        const t = f * f * (3.0 - 2.0 * f);
+        return hash1D(i) + (hash1D(i + 1) - hash1D(i)) * t;
+    }
+    function organicNoise1D(x) {
+        return smoothNoise1D(x * 0.7) * 0.5
+             + smoothNoise1D(x * 1.3 + 5.2) * 0.3
+             + smoothNoise1D(x * 2.1 + 2.8) * 0.2;
+    }
+
+    function updateSpringDynamics(delta) {
+        const s = springState, sp = SPRING;
+        const dt = Math.min(delta, 0.1);
+
+        s.currentRate += (s.targetRate - s.currentRate) * (1.0 - Math.exp(-dt * 3.5));
+        s.breathPhase += s.currentRate * dt;
+        s.noisePhase += dt * 0.55;
+
+        const rawSin = Math.sin(s.breathPhase);
+        const rawHarm = Math.sin(s.breathPhase * 2.0) * 0.3;
+        const rawBreathe = rawSin + rawHarm * (1.0 - Math.abs(rawSin));
+        const noise = organicNoise1D(s.breathPhase * 0.45 + s.noisePhase) * sp.noiseAmp;
+        const targetCoreDisp = (rawBreathe + noise) * coreBreathAmp;
+
+        s.coreVel += (sp.coreK * (targetCoreDisp - s.coreDisp) - sp.coreDamp * s.coreVel) * dt;
+        const coreBound = Math.abs(targetCoreDisp) * (1.0 + sp.overshootLimit);
+        if (Math.abs(s.coreDisp) > coreBound && s.coreVel * s.coreDisp > 0) s.coreVel *= 0.35;
+        s.coreDisp += s.coreVel * dt;
+
+        const targetShellDisp = (rawBreathe + noise * 0.5) * shellBreathAmp;
+        s.shellVel += (sp.shellK * (targetShellDisp - s.shellDisp) - sp.shellDamp * s.shellVel) * dt;
+        const shellBound = Math.abs(targetShellDisp) * (1.0 + sp.overshootLimit);
+        if (Math.abs(s.shellDisp) > shellBound && s.shellVel * s.shellDisp > 0) s.shellVel *= 0.35;
+        s.shellDisp += s.shellVel * dt;
+
+        const coreS = 1.0 + s.coreDisp;
+        const coreZIdeal = 1.0 / (coreS * coreS);
+        s.coreScaleXY = coreS;
+        s.coreScaleZ = coreS * 0.12 + coreZIdeal * 0.88;
+
+        const shellS = 1.0 + s.shellDisp;
+        const shellZIdeal = 1.0 / (shellS * shellS);
+        s.shellScaleXY = shellS;
+        s.shellScaleZ = shellS * 0.12 + shellZIdeal * 0.88;
+    }
+
+    // ---- Energy feedback ----
+    function triggerMotherRipple() {
+        if (rippleRecoveryTween) { rippleRecoveryTween.stop(); rippleRecoveryTween = null; }
+        springState.targetRate = 4.19;
+        rippleRecoveryTween = new TWEEN.Tween(springState)
+            .to({ targetRate: 1.256 }, 2200)
+            .easing(TWEEN.Easing.Exponential.Out)
+            .onComplete(() => { rippleRecoveryTween = null; })
+            .start();
+
+        // Color ripples
+        const rippleCount = 2 + Math.floor(Math.random() * 2);
+        for (let r = 0; r < rippleCount; r++) {
+            const rippleGeo = new THREE.RingGeometry(2.6, 2.7, 64);
+            const rippleMat = new THREE.MeshBasicMaterial({
+                color: r === 0 ? 0x00E5FF : (r === 1 ? 0x6AD4E0 : 0xFFB300),
+                side: THREE.DoubleSide, transparent: true, opacity: 0.7,
+                blending: THREE.AdditiveBlending, depthWrite: false
+            });
+            const ripple = new THREE.Mesh(rippleGeo, rippleMat);
+            ripple.rotation.x = Math.PI / 2;
+            ripple.position.copy(motherGroup.position);
+            scene.add(ripple);
+
+            const delay = r * 200;
+            new TWEEN.Tween(ripple.scale)
+                .delay(delay).to({ x: 3.5 + r * 1.5, y: 3.5 + r * 1.5, z: 1 }, 1200 + r * 400)
+                .easing(TWEEN.Easing.Exponential.Out).start();
+            new TWEEN.Tween(rippleMat)
+                .delay(delay).to({ opacity: 0 }, 1200 + r * 400)
+                .easing(TWEEN.Easing.Exponential.Out)
+                .onComplete(() => { scene.remove(ripple); rippleGeo.dispose(); rippleMat.dispose(); })
+                .start();
+        }
+
+        // Core color sequence: rest → cyan → amber → rest
+        const restCore = { r: 74/255, g: 107/255, b: 140/255 };
+        const cyan = { r: 0, g: 229/255, b: 1 };
+        const amber = { r: 1, g: 179/255, b: 0 };
+        const restShell = { r: 90/255, g: 122/255, b: 142/255 };
+
+        const coreCol = { r: coreMat.color.r, g: coreMat.color.g, b: coreMat.color.b };
+        const shellCol = { r: shellMat.color.r, g: shellMat.color.g, b: shellMat.color.b };
+        const knotEm = { r: organicMaterial.emissive.r, g: organicMaterial.emissive.g, b: organicMaterial.emissive.b };
+
+        const shellCyan  = { r: cyan.r*0.6+restShell.r*0.4, g: cyan.g*0.6+restShell.g*0.4, b: cyan.b*0.6+restShell.b*0.4 };
+        const shellAmber = { r: amber.r*0.6+restShell.r*0.4, g: amber.g*0.6+restShell.g*0.4, b: amber.b*0.6+restShell.b*0.4 };
+
+        const tCoreCyan = new TWEEN.Tween(coreCol).to(cyan, 400).easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => coreMat.color.setRGB(coreCol.r, coreCol.g, coreCol.b));
+        const tCoreAmber = new TWEEN.Tween(coreCol).to(amber, 600).easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => coreMat.color.setRGB(coreCol.r, coreCol.g, coreCol.b));
+        const tCoreRest = new TWEEN.Tween(coreCol).to(restCore, 1500).easing(TWEEN.Easing.Exponential.Out)
+            .onUpdate(() => coreMat.color.setRGB(coreCol.r, coreCol.g, coreCol.b));
+        tCoreCyan.chain(tCoreAmber); tCoreAmber.chain(tCoreRest); tCoreCyan.start();
+
+        const tShellCyan = new TWEEN.Tween(shellCol).delay(150).to(shellCyan, 350).easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => shellMat.color.setRGB(shellCol.r, shellCol.g, shellCol.b));
+        const tShellAmber = new TWEEN.Tween(shellCol).to(shellAmber, 500).easing(TWEEN.Easing.Quadratic.InOut)
+            .onUpdate(() => shellMat.color.setRGB(shellCol.r, shellCol.g, shellCol.b));
+        const tShellRest = new TWEEN.Tween(shellCol).to(restShell, 1500).easing(TWEEN.Easing.Exponential.Out)
+            .onUpdate(() => shellMat.color.setRGB(shellCol.r, shellCol.g, shellCol.b));
+        tShellCyan.chain(tShellAmber); tShellAmber.chain(tShellRest); tShellCyan.start();
+
+        // Halo
+        const tHaloIn = new TWEEN.Tween(haloMat).to({ opacity: 0.50 }, 350).easing(TWEEN.Easing.Quadratic.Out);
+        const tHaloOut = new TWEEN.Tween(haloMat).to({ opacity: 0 }, 2200).easing(TWEEN.Easing.Exponential.Out);
+        tHaloIn.chain(tHaloOut); tHaloIn.start();
+        const tHaloScaleUp = new TWEEN.Tween(halo.scale).to({ x: 10, y: 10, z: 1 }, 500).easing(TWEEN.Easing.Quadratic.Out);
+        const tHaloScaleDown = new TWEEN.Tween(halo.scale).to({ x: 6, y: 6, z: 1 }, 2200).easing(TWEEN.Easing.Exponential.Out);
+        tHaloScaleUp.chain(tHaloScaleDown); tHaloScaleUp.start();
+
+        // Core light
+        const tLightUp = new TWEEN.Tween(coreLight).to({ intensity: 22 }, 350).easing(TWEEN.Easing.Quadratic.Out);
+        const tLightDown = new TWEEN.Tween(coreLight).to({ intensity: 5 }, 2800).easing(TWEEN.Easing.Exponential.Out);
+        tLightUp.chain(tLightDown); tLightUp.start();
+
+        // Knot emissive
+        const knotCyan = { r: cyan.r*0.3, g: cyan.g*0.3, b: cyan.b*0.3 };
+        const knotRest = { r: 10/255, g: 21/255, b: 40/255 };
+        const tKnotUp = new TWEEN.Tween(knotEm).delay(350).to(knotCyan, 400).easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(() => organicMaterial.emissive.setRGB(knotEm.r, knotEm.g, knotEm.b));
+        const tKnotDown = new TWEEN.Tween(knotEm).to(knotRest, 2000).easing(TWEEN.Easing.Exponential.Out)
+            .onUpdate(() => organicMaterial.emissive.setRGB(knotEm.r, knotEm.g, knotEm.b));
+        tKnotUp.chain(tKnotDown); tKnotUp.start();
+    }
+
+    // ---- Energy threads ----
+    function spawnEnergyThreads(origin, targetOverride, count, colorHex) {
+        const actualCount = count || 12;
+        const target = targetOverride || new THREE.Vector3(0, motherGroup.position.y, 0);
+        const threadGeo = new THREE.CylinderGeometry(0.015, 0.025, 0.6, 6);
+        const baseColor = colorHex || 0x8AC8E8;
+
+        for (let i = 0; i < actualCount; i++) {
+            const threadMat = new THREE.MeshBasicMaterial({
+                color: baseColor, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending
+            });
+            const thread = new THREE.Mesh(threadGeo, threadMat);
+            const startPos = origin.clone().add(
+                new THREE.Vector3((Math.random()-0.5)*3, (Math.random()-0.5)*2, (Math.random()-0.5)*2)
+            );
+            thread.position.copy(startPos);
+            thread.userData = {
+                startX: startPos.x, startY: startPos.y, startZ: startPos.z,
+                phase: Math.random() * Math.PI * 2,
+                wobbleAmp: 0.4 + Math.random() * 0.8
+            };
+            scene.add(thread);
+
+            const midX = startPos.x * 0.3 + (Math.random() - 0.5) * 4;
+            const midY = startPos.y + (target.y - startPos.y) * 0.5 + (Math.random() - 0.5) * 3;
+            const midZ = startPos.z * 0.5 + (Math.random() - 0.5) * 4;
+
+            const duration = 1200 + Math.random() * 600;
+            const animData = { t: 0 };
+
+            new TWEEN.Tween(animData)
+                .to({ t: 1 }, duration)
+                .easing(TWEEN.Easing.Quadratic.In)
+                .onUpdate(() => {
+                    const t = animData.t;
+                    const it = 1 - t;
+                    const bx = it*it*thread.userData.startX + 2*it*t*midX + t*t*target.x;
+                    const by = it*it*thread.userData.startY + 2*it*t*midY + t*t*target.y;
+                    const bz = it*it*thread.userData.startZ + 2*it*t*midZ + t*t*target.z;
+                    const wobX = Math.sin(t * 8 + thread.userData.phase) * thread.userData.wobbleAmp * (1 - t);
+                    const wobY = Math.cos(t * 6 + thread.userData.phase) * thread.userData.wobbleAmp * 0.6 * (1 - t);
+                    thread.position.set(bx + wobX, by + wobY, bz);
+                    thread.quaternion.setFromUnitVectors(
+                        new THREE.Vector3(0, 1, 0),
+                        new THREE.Vector3(
+                            -2*it*(thread.userData.startX - midX) + 2*t*(midX - target.x) + wobX,
+                            -2*it*(thread.userData.startY - midY) + 2*t*(midY - target.y) + wobY,
+                            -2*it*(thread.userData.startZ - midZ) + 2*t*(midZ - target.z)
+                        ).normalize()
+                    );
+                    thread.scale.setScalar(1 - t * 0.7);
+                    thread.material.opacity = 0.85 * (1 - t);
+                })
+                .onComplete(() => {
+                    scene.remove(thread);
+                    threadGeo.dispose();
+                })
+                .start();
+        }
+    }
+
+    // ---- DOM → 3D coordinate conversion ----
+    function getWorldPosFromDOM(element) {
+        const rect = element.getBoundingClientRect();
+        const x = (rect.left + rect.width / 2) / window.innerWidth * 2 - 1;
+        const y = -(rect.top + rect.height / 2) / window.innerHeight * 2 + 1;
+        const vector = new THREE.Vector3(x, y, 0.5);
+        vector.unproject(camera);
+        const dir = vector.sub(camera.position).normalize();
+        const distance = -camera.position.z / dir.z;
+        return camera.position.clone().add(dir.multiplyScalar(distance));
+    }
+
+    // ==================== UI HELPERS ====================
+    function setStatus(text, isError) {
+        statusLine.textContent = text;
+        statusLine.className = isError ? 'error' : '';
+    }
+
+    function showInterim(text) {
+        interimText.textContent = text;
+        interimText.classList.toggle('visible', !!text);
+    }
+
+    function dissolveDialogue(wrapper) {
+        if (wrapper.style.opacity !== '0' && !wrapper.classList.contains('dissolving')) {
+            wrapper.classList.add('dissolving');
+        }
+    }
+
+    function showDialogue(wrapper, textEl, text) {
+        wrapper.classList.remove('dissolving');
+        wrapper.style.opacity = '1';
+        textEl.textContent = text;
+        // Reset transform for simple show
+        wrapper.style.transform = '';
+    }
+
+    function appendDialogue(wrapper, textEl, chunk) {
+        var wasEmpty = !textEl.textContent;
+        textEl.textContent += chunk;
+        wrapper.classList.remove('dissolving');
+        if (wasEmpty) {
+            animateDivision(wrapper);
+        } else {
+            wrapper.style.opacity = '1';
+            wrapper.style.transform = '';
+        }
+    }
+
+    function hideHint() {
+        hint.style.opacity = '0';
+        clearTimeout(hintTimer);
+    }
+
+    // ---- Cell division animation (dialogue appear) ----
+    function animateDivision(wrapper) {
+        wrapper.style.opacity = '1';
+        const isLeft = wrapper.id === 'wrapper-left';
+        const startX = isLeft ? 30 : -30;
+        const endX = isLeft ? -25 : 25;
+
+        new TWEEN.Tween({ x: startX, scale: 0.1, stretch: 1.5 })
+            .to({ x: endX, scale: 1, stretch: 1 }, 1000)
+            .easing(TWEEN.Easing.Back.Out)
+            .onUpdate(obj => {
+                wrapper.style.transform = `translateX(${obj.x}vw) scale(${obj.scale}) scaleX(${obj.stretch})`;
+            })
+            .start();
+    }
+
+    // ---- Energy feedback: user → mother → AI ----
+    function feedbackUserToAI(userText) {
+        const shortText = userText.length > 60 ? userText.slice(0, 60) + '…' : userText;
+        showDialogue(wLeft, dLeftText, shortText);
+
+        clearTimeout(dissolveTimer);
+        dissolveTimer = setTimeout(() => {
+            dissolveDialogue(wLeft);
+            const leftOrigin = new THREE.Vector3(-6, motherGroup.position.y - 2, 3);
+            const motherTarget = new THREE.Vector3(0, motherGroup.position.y, 0);
+            spawnEnergyThreads(leftOrigin, motherTarget, 8, 0xC0D6E4);
+        }, 1500);
+    }
+
+    function feedbackAIDone() {
+        const motherOrigin = new THREE.Vector3(0, motherGroup.position.y, 0);
+        const rightTarget = new THREE.Vector3(6, motherGroup.position.y - 3, 3);
+        spawnEnergyThreads(motherOrigin, rightTarget, 8, 0x8AACD6);
+    }
+
+    // ==================== WEBSOCKET ====================
+    function connect() {
+        if (ws && ws.readyState === WebSocket.OPEN) return;
+
+        setStatus('● 连接中...', false);
+        const url = `${WS_URL}/ws/${sessionId}`;
+        ws = new WebSocket(url);
+
+        ws.onopen = () => {
+            isConnected = true;
+            setStatus('● 在线', false);
+            if (hint.textContent.includes('点击')) {
+                hint.textContent = '点击突触节点说话 · 或直接输入文字';
+            }
+        };
+
+        ws.onmessage = (e) => {
+            try {
+                handleMessage(JSON.parse(e.data));
+            } catch (err) {
+                // Binary or invalid — ignore
+            }
+        };
+
+        ws.onclose = () => {
+            isConnected = false;
+            setStatus('● 重连中...', true);
+            stopAudio();
+            mic.classList.remove('processing', 'recording');
+            isRecording = false;
+            isProcessing = false;
+            setTimeout(connect, 2000);
+        };
+
+        ws.onerror = () => {
+            setStatus('● 连接失败', true);
+        };
+    }
+
+    function send(data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(data));
+        }
+    }
+
+    function handleMessage(msg) {
+        switch (msg.type) {
+            case 'text_chunk': {
+                if (msg.content) {
+                    appendDialogue(wRight, dRightText, msg.content);
+                }
+                if (msg.is_final) {
+                    isProcessing = false;
+                    mic.classList.remove('processing');
+                    setStatus('● 在线', false);
+                    feedbackAIDone();
+                    // Apply emotion to the final dialogue bubble
+                    if (dRightBubble.classList.contains('emotion-active')) {
+                        // Already styled via animation loop
+                    }
+                }
+                break;
+            }
+            case 'emotion': {
+                if (msg.weights) {
+                    currentEmotionWeights = msg.weights;
+                } else if (msg.emotion) {
+                    const emap = {
+                        '开心': 'happy', 'happy': 'happy',
+                        '悲伤': 'sad', 'sad': 'sad',
+                        '愤怒': 'angry', 'angry': 'angry',
+                        '焦虑': 'tense', 'anxious': 'tense',
+                        '兴奋': 'excited', 'excited': 'excited',
+                        '平静': 'calm', 'calm': 'calm',
+                        '中性': 'neutral', 'neutral': 'neutral'
+                    };
+                    const key = emap[msg.emotion] || 'neutral';
+                    currentEmotionWeights = { happy:0, calm:0, sad:0, angry:0, excited:0, tense:0, neutral:0 };
+                    currentEmotionWeights[key] = msg.intensity || 0.5;
+                    currentEmotionWeights.neutral = Math.max(0, 1 - (msg.intensity || 0.5));
+                }
+                break;
+            }
+            case 'audio': {
+                if (msg.format) audioFormat = msg.format;
+                if (msg.data) {
+                    const binary = atob(msg.data);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                    if (msg.is_new_file) audioChunks = [];
+                    audioChunks.push(bytes);
+                }
+                if (msg.is_final && audioChunks.length > 0) {
+                    playAudio();
+                }
+                break;
+            }
+            case 'interrupted': {
+                isProcessing = false;
+                mic.classList.remove('processing');
+                stopAudio();
+                setStatus('● 在线', false);
+                // Dissolve partial AI response
+                dissolveDialogue(wRight);
+                break;
+            }
+            case 'status': {
+                if (msg.status === 'listening') {
+                    isProcessing = false;
+                    mic.classList.remove('processing');
+                    setStatus('● 在线', false);
+                }
+                break;
+            }
+            case 'memory_context':
+            case 'complete': {
+                // complete: final summary, no UI action needed
+                break;
+            }
+            case 'error': {
+                isProcessing = false;
+                mic.classList.remove('processing');
+                setStatus('⚠ ' + (msg.message || 'Error'), true);
+                dissolveDialogue(wRight);
+                break;
+            }
+        }
+    }
+
+    // ==================== AUDIO PLAYBACK ====================
+    function playAudio() {
+        stopAudio();
+        const all = new Uint8Array(audioChunks.reduce((a, c) => a + c.length, 0));
+        let off = 0;
+        for (const c of audioChunks) { all.set(c, off); off += c.length; }
+        audioChunks = [];
+
+        const mime = audioFormat === 'mp3' ? 'audio/mpeg' : `audio/${audioFormat}`;
+        const blob = new Blob([all], { type: mime });
+        const url = URL.createObjectURL(blob);
+
+        const audio = new Audio(url);
+        currentAudio = audio;
+        audio.onended = () => {
+            currentAudio = null;
+            URL.revokeObjectURL(url);
+        };
+        audio.onerror = () => {
+            currentAudio = null;
+            URL.revokeObjectURL(url);
+        };
+        audio.play().catch(() => {});
+    }
+
+    function stopAudio() {
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+        }
+    }
+
+    // ==================== SPEECH RECOGNITION ====================
+    function startRecording() {
+        if (isRecording || isProcessing) return;
+
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) {
+            setStatus('⚠ 浏览器不支持语音', true);
+            textWrap.classList.add('visible');
+            textInput.focus();
+            return;
+        }
+
+        if (currentAudio) {
+            send({ type: 'control', action: 'interrupt', session_id: sessionId });
+            stopAudio();
+        }
+
+        hideHint();
+        isRecording = true;
+        mic.classList.add('recording');
+        setStatus('● 聆听中...', false);
+
+        const rec = new SR();
+        rec.lang = 'zh-CN';
+        rec.continuous = true;
+        rec.interimResults = true;
+        speechRecognition = rec;
+
+        rec.onstart = () => { isRecording = true; showInterim(''); };
+        rec.onresult = (e) => {
+            let interim = '', final = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                const t = e.results[i][0].transcript;
+                if (e.results[i].isFinal) final += t;
+                else interim += t;
+            }
+            showInterim(interim);
+            if (final) {
+                showInterim('');
+                sendText(final);
+                stopRecording();
+            }
+        };
+        rec.onerror = (e) => {
+            stopRecording();
+            if (e.error === 'no-speech') setStatus('● 未检测到语音', true);
+            else if (e.error !== 'aborted') setStatus('⚠ 识别错误', true);
+        };
+        rec.onend = () => { stopRecording(); };
+
+        rec.start();
+    }
+
+    function stopRecording() {
+        isRecording = false;
+        mic.classList.remove('recording');
+        showInterim('');
+        if (speechRecognition) {
+            try { speechRecognition.stop(); } catch(e) {}
+            speechRecognition = null;
+        }
+    }
+
+    function sendText(text) {
+        const content = text.trim();
+        if (!content || !isConnected) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        hideHint();
+        isProcessing = true;
+        mic.classList.add('processing');
+        setStatus('● 处理中...', false);
+
+        // Show user message → dissolve → energy feedback
+        feedbackUserToAI(content);
+
+        // Dissolve previous AI response, then prepare for new
+        if (wRight.style.opacity !== '0' && dRightText.textContent) {
+            dissolveDialogue(wRight);
+            setTimeout(() => {
+                dRightText.textContent = '';
+                wRight.classList.remove('dissolving');
+                wRight.style.opacity = '0';
+            }, 550);
+        } else {
+            dRightText.textContent = '';
+            wRight.style.opacity = '0';
+            wRight.classList.remove('dissolving');
+        }
+        audioChunks = [];
+
+        send({ type: 'text_input', content, session_id: sessionId });
+    }
+
+    // ==================== EVENT LISTENERS ====================
+    mic.addEventListener('click', () => {
+        if (isRecording) {
+            stopRecording();
+        } else if (!isProcessing) {
+            startRecording();
+        }
+    });
+
+    // Keyboard text input
+    document.addEventListener('keydown', (e) => {
+        if (e.target === textInput) return;
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            textWrap.classList.add('visible');
+            textInput.focus();
+        }
+        if (e.key === 'Enter' && !isRecording && !isProcessing) {
+            textWrap.classList.add('visible');
+            textInput.focus();
+        }
+    });
+
+    textInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const text = textInput.value;
+            if (text.trim()) {
+                sendText(text);
+                textInput.value = '';
+            }
+            textWrap.classList.remove('visible');
+            textInput.blur();
+        }
+        if (e.key === 'Escape') {
+            textWrap.classList.remove('visible');
+            textInput.blur();
+            textInput.value = '';
+        }
+    });
+
+    textInput.addEventListener('blur', () => {
+        setTimeout(() => {
+            if (document.activeElement !== textInput) {
+                textWrap.classList.remove('visible');
+            }
+        }, 300);
+    });
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ==================== EMOTION → DIALOGUE STYLING ====================
+    function applyEmotionToDialogue() {
+        const w = currentEmotionWeights;
+
+        const hues = {
+            happy:   [255, 221, 0],
+            calm:    [160, 240, 160],
+            sad:     [122, 106, 192],
+            angry:   [255, 85,  0],
+            excited: [0,   238, 255],
+            tense:   [255, 136, 68],
+            neutral: [226, 240, 249]
+        };
+
+        let er = 0, eg = 0, eb = 0, total = 0;
+        for (const [key, rgb] of Object.entries(hues)) {
+            const weight = w[key] || 0;
+            er += rgb[0] * weight; eg += rgb[1] * weight; eb += rgb[2] * weight;
+            total += weight;
+        }
+        if (total > 0) { er /= total; eg /= total; eb /= total; }
+
+        const glowR = Math.min(255, Math.round(er + (255 - er) * 0.35));
+        const glowG = Math.min(255, Math.round(eg + (255 - eg) * 0.35));
+        const glowB = Math.min(255, Math.round(eb + (255 - eb) * 0.35));
+
+        let peak = 0;
+        for (const k of ['happy','calm','sad','angry','excited','tense']) {
+            peak = Math.max(peak, w[k] || 0);
+        }
+        const intensity = 0.25 + peak * 0.75;
+
+        [dLeftBubble, dRightBubble].forEach(bubble => {
+            const wrapper = bubble.parentElement;
+            const hasContent = wrapper.style.opacity !== '0' && bubble.querySelector('.dialogue-text').textContent;
+            if (hasContent) {
+                bubble.classList.add('emotion-active');
+                bubble.style.setProperty('--emo-r', Math.round(er));
+                bubble.style.setProperty('--emo-g', Math.round(eg));
+                bubble.style.setProperty('--emo-b', Math.round(eb));
+                bubble.style.setProperty('--glow-r', glowR);
+                bubble.style.setProperty('--glow-g', glowG);
+                bubble.style.setProperty('--glow-b', glowB);
+                bubble.style.setProperty('--glow-intensity', intensity.toFixed(2));
+            } else {
+                bubble.classList.remove('emotion-active');
+            }
+        });
+    }
+
+    // ==================== EMOTION → 3D MAPPING ====================
+    function applyEmotionToScene(delta) {
+        const w = currentEmotionWeights;
+
+        const hues = {
+            happy:   new THREE.Color(0xFFDD00),
+            calm:    new THREE.Color(0xA0F0A0),
+            sad:     new THREE.Color(0x7A6AC0),
+            angry:   new THREE.Color(0xFF5500),
+            excited: new THREE.Color(0x00EEFF),
+            tense:   new THREE.Color(0xFF8844),
+            neutral: new THREE.Color(0x8AACD6)
+        };
+
+        const blended = new THREE.Color(0x000000);
+        let totalW = 0;
+        for (const [key, color] of Object.entries(hues)) {
+            blended.r += color.r * (w[key] || 0);
+            blended.g += color.g * (w[key] || 0);
+            blended.b += color.b * (w[key] || 0);
+            totalW += (w[key] || 0);
+        }
+        if (totalW > 0) blended.multiplyScalar(1 / totalW);
+
+        coreLight.color.lerp(blended, 0.03);
+        const intensityBonus = (w.excited || 0) * 3 + (w.angry || 0) * 2 + (w.happy || 0) * 1.5;
+        const targetIntensity = coreLight.userData.baseIntensity + intensityBonus;
+        coreLight.intensity += (targetIntensity - coreLight.intensity) * 0.03;
+
+        const coreTargetOpacity = innerCore.userData.baseOpacity + (w.excited || 0) * 0.4 + (w.happy || 0) * 0.2;
+        innerCore.material.opacity += (coreTargetOpacity - innerCore.material.opacity) * 0.03;
+
+        particlesMat.color.lerp(blended, 0.01);
+
+        // Fresnel rim light follows emotion blend
+        rimMat.uniforms.uColor.value.lerp(blended, 0.02);
+    }
+
+    // ==================== ANIMATION LOOP ====================
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        TWEEN.update();
+
+        const time = clock.getElapsedTime();
+        const delta = Math.min(clock.getDelta(), 0.1);
+        const w = currentEmotionWeights;
+
+        const audioActive = isRecording || isProcessing;
+        const emotionSpeed = 1 + (w.excited || 0) * 1.5 + (w.angry || 0) * 1.0 + (w.happy || 0) * 0.5;
+        const emotionAmplitude = 0.03 + (w.excited || 0) * 0.06 + (w.angry || 0) * 0.04;
+
+        // ---- Mother group ----
+        motherGroup.rotation.y += 0.001 * emotionSpeed;
+        motherGroup.rotation.z = Math.sin(time * 0.5) * 0.05;
+        motherGroup.position.y = 4 + Math.sin(time * 0.8) * 0.2;
+
+        motherGroup.children.forEach(child => {
+            if (child.userData.baseScale) {
+                const pulseFreq = audioActive ? 5.0 * emotionSpeed : 1.0 * emotionSpeed;
+                const pulseAmp  = audioActive ? 0.08 * emotionAmplitude : 0.03 * emotionAmplitude;
+                const scale = 1 + Math.sin(time * pulseFreq + child.rotation.x) * pulseAmp;
+                child.scale.copy(child.userData.baseScale).multiplyScalar(scale);
+                child.rotation.x += child.userData.animSpeed * emotionSpeed;
+            }
+        });
+
+        // Spring dynamics
+        updateSpringDynamics(delta);
+        innerCore.scale.set(springState.coreScaleXY, springState.coreScaleXY, springState.coreScaleZ);
+        coreMat.opacity = 0.40 + springState.coreDisp * 1.0;
+        shell.scale.set(springState.shellScaleXY, springState.shellScaleXY, springState.shellScaleZ);
+        shellMat.bumpScale = 0.06 + springState.shellDisp * 0.48;
+        rimMat.uniforms.uFresnelPower.value = 2.5 + springState.shellDisp * 12.0;
+
+        // ---- Jellyfish microbes ----
+        microbes.forEach(m => {
+            const data = m.userData;
+            const targetRX = audioActive ? data.baseRadiusX * 0.25 : data.baseRadiusX;
+            const targetRZ = audioActive ? data.baseRadiusZ * 0.25 : data.baseRadiusZ;
+            const targetSpeed = audioActive ? data.baseSpeed * 6 : data.baseSpeed;
+
+            data.currentRadiusX += (targetRX - data.currentRadiusX) * 0.015;
+            data.currentRadiusZ += (targetRZ - data.currentRadiusZ) * 0.015;
+
+            const pulse = Math.sin(time * 4 + data.phase);
+            let moveSpeed = data.currentSpeed;
+            if (pulse > 0) moveSpeed += pulse * 0.005;
+            data.angle += moveSpeed;
+
+            data.tentacles.forEach((t, i) => {
+                t.rotation.x = Math.sin(time * 4 + data.phase + i) * 0.3 * (pulse > 0 ? 1 : 0.2);
+            });
+            data.dome.scale.set(1 - pulse * 0.1, 1 + pulse * 0.2, 1 - pulse * 0.1);
+
+            const noiseX = Math.sin(time * 1.2 + data.phase) * 0.5;
+            const noiseY = Math.cos(time * 1.0 + data.phase) * 0.5;
+            const x = Math.cos(data.angle) * data.currentRadiusX + noiseX;
+            const z = Math.sin(data.angle) * data.currentRadiusZ;
+            const y = motherGroup.position.y + data.yOffset + noiseY;
+
+            const prevPos = m.position.clone();
+            m.position.set(x, y, z);
+            if (m.position.distanceToSquared(prevPos) > 0.0001) {
+                const targetLook = m.position.clone().add(m.position.clone().sub(prevPos));
+                m.lookAt(targetLook);
+            }
+        });
+
+        // ---- Bubble system ----
+        const safeDelta = Math.min(delta, 0.1);
+        bubbleSpawnTimer -= safeDelta;
+        if (bubbleSpawnTimer <= 0) {
+            spawnBubble();
+            bubbleSpawnTimer = bubbleSpawnBase * (0.7 + Math.random() * 0.6);
+        }
+
+        for (let i = bubbles.length - 1; i >= 0; i--) {
+            const bubble = bubbles[i];
+            const bd = bubble.userData;
+
+            if (bd.state === 'rising') {
+                const travelRange = 6 - bd.startY;
+                const progress = Math.max(0, (bubble.position.y - bd.startY) / travelRange);
+                const speedCurve = 0.4 + 2.4 * progress * (1 - progress);
+                bubble.position.y += bd.speed * safeDelta * speedCurve;
+
+                const hAmp = bd.wAmp1 * (0.3 + Math.min(progress, 1) * 0.7);
+                bubble.position.x = bd.spawnX
+                    + Math.sin(time * bd.wFreq1 + bd.wPhase) * hAmp
+                    + Math.cos(time * bd.wFreq2 + bd.wPhase * 1.7) * bd.wAmp2 * 0.6;
+
+                const rMult = 1 + Math.min(progress, 1) * 0.45;
+                const r = bd.baseRadius * rMult;
+                bubble.scale.set(r, r, 1);
+                bubble.lookAt(camera.position);
+
+                if (bubble.position.y > 6) {
+                    bd.state = 'squishing';
+                    bd.squishTimer = 0;
+                }
+            } else if (bd.state === 'squishing') {
+                bd.squishTimer += safeDelta;
+                const t = Math.min(bd.squishTimer / bd.squishDur, 1);
+                const r = bd.baseRadius * 1.45;
+                bubble.scale.set(r * (1 + t * 0.07), r * (1 - t * 0.18), 1);
+                bubble.lookAt(camera.position);
+
+                if (t >= 1) {
+                    burstBubble(bubble);
+                    bubbles.splice(i, 1);
+                }
+            }
+        }
+
+        // Droplet particles
+        for (let i = bubbleParticles.length - 1; i >= 0; i--) {
+            const p = bubbleParticles[i];
+            const pd = p.userData;
+            pd.age += safeDelta;
+            const lifeRatio = pd.age / pd.life;
+
+            if (lifeRatio >= 1) {
+                scene.remove(p);
+                p.material.dispose();
+                bubbleParticles.splice(i, 1);
+            } else {
+                p.position.x += pd.vx * safeDelta;
+                p.position.y += pd.vy * safeDelta;
+                p.position.z += pd.vz * safeDelta;
+                p.lookAt(camera.position);
+                const fade = 1 - lifeRatio;
+                p.material.opacity = 0.7 * fade;
+                const s = p.scale.x * fade;
+                p.scale.set(Math.max(s, 0.001), Math.max(s, 0.001), 1);
+            }
+        }
+
+        // ---- Particles ----
+        const positions = particleSystem.geometry.attributes.position.array;
+        for (let i = 1; i < particleCount * 3; i += 3) {
+            positions[i] += Math.sin(time + positions[i-1]) * 0.005;
+        }
+        particleSystem.geometry.attributes.position.needsUpdate = true;
+        particleSystem.rotation.y += 0.0005;
+
+        // ---- Emotion → scene + dialogue ----
+        if (isConnected) {
+            applyEmotionToScene(delta);
+            applyEmotionToDialogue();
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    // ==================== INIT ====================
+    animate();
+    connect();
+
+    // Hint fade-in after inactivity
+    function resetHintTimer() {
+        clearTimeout(hintTimer);
+        hint.style.opacity = '0';
+        hintTimer = setTimeout(() => { hint.style.opacity = '1'; }, 8000);
+    }
+    document.addEventListener('click', resetHintTimer);
+    document.addEventListener('keydown', resetHintTimer);
+
+    // ==================== SETTINGS SYNC (BroadcastChannel) ====================
+    const SETTINGS_CHANNEL = 'voice-settings-sync';
+    let syncedSettings = null;
+    const settingsBC = new BroadcastChannel(SETTINGS_CHANNEL);
+
+    settingsBC.onmessage = (e) => {
+        if (e.data.type === 'settings-updated' && e.data.settings) {
+            syncedSettings = e.data.settings;
+            console.log('[聊天页] 设置已同步:', syncedSettings);
+        }
+        if (e.data.type === 'request-sync') {
+            settingsBC.postMessage({ type: 'settings-updated', settings: syncedSettings, timestamp: Date.now() });
+        }
+    };
+
+})();
+</script>
+</body>
+</html>

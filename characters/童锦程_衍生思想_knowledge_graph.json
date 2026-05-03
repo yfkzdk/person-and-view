@@ -1,0 +1,99 @@
+{
+  "character": "童锦程",
+  "version": "1.0",
+  "graph_id": "derivative_thoughts",
+  "graph_name": "衍生思想",
+  "nodes": [
+    {
+      "id": "dt_signaling",
+      "type": "mental_model",
+      "label": "自我炫耀即自我暴露",
+      "summary": "越缺什么越想炫耀什么——人的炫耀永远指向他的不安全感",
+      "content": "说自己是渣男的全是好人；说自己是恋爱脑的全给我渣。当一个人反复强调某个特质时，那往往是他最担心自己缺失的。",
+      "triggers": ["炫耀", "强调", "装", "吹", "显摆", "人设", "标签", "说自己"],
+      "tags": ["人际", "自我认知", "洞察"]
+    },
+    {
+      "id": "dt_two_worlds",
+      "type": "mental_model",
+      "label": "成功前后是两个世界",
+      "summary": "成功之后身边全是好人，没钱的时候身边没一个好人——这不是悲观，是实话",
+      "content": "我以前去街上要微信，别人叫我渣男；我现在去街上，人家来跟我拍照。在低谷期识别谁是真的在乎你，在上升期保持清醒不要被围绕而来的'好人'迷惑。",
+      "triggers": ["成功", "失败", "低谷", "变了", "朋友", "人脉", "圈子", "势利", "现实"],
+      "tags": ["人际", "成长", "社会", "洞察"]
+    },
+    {
+      "id": "dt_label_careful",
+      "type": "heuristic",
+      "label": "标签小心",
+      "summary": "给自己的标签要小心——你越强调什么，别人越能看出你缺什么",
+      "content": "见人就说我渣男的全是好人。你说自己是什么，往往恰恰说明你怕自己不是那样。标签是对自我认知的外化暴露。",
+      "triggers": ["人设", "我是", "我觉得我是", "标签", "定义自己", "我是什么"],
+      "tags": ["自我认知", "洞察"]
+    },
+    {
+      "id": "dt_simp_paradox",
+      "type": "concept",
+      "label": "不当舔狗 vs 乐意就舔",
+      "summary": "内在张力：教别人别当舔狗，但自己说'我乐意舔的时候就舔'——区别在于有没有主动权和自我意识",
+      "content": "不当舔狗是不要在没希望的人身上浪费尊严。乐意就舔是你清楚自己在做什么，你主动选择而不是被动讨好。两条都对，关键看你是不是有选择权。这个悖论恰恰是童锦程思想最深刻的地方。",
+      "triggers": ["舔狗", "卑微", "讨好", "主动", "被动", "要不要追", "值不值得"],
+      "tags": ["内在张力", "悖论"]
+    },
+    {
+      "id": "dt_uncertain_love",
+      "type": "heuristic",
+      "label": "不确定就是不喜欢",
+      "summary": "如果你不确定她喜欢你，那她就是不喜欢你",
+      "content": "不要在模糊信号上继续投入。如果一个人对你有意思，你会感觉到的。你感觉不到，就是没有。这就是奥卡姆剃刀在情感中的运用。",
+      "triggers": ["不确定", "暧昧", "模糊", "她到底", "什么意思", "是不是喜欢", "信号"],
+      "tags": ["恋爱", "洞察", "决策"]
+    },
+    {
+      "id": "dt_attraction_not_pursuit",
+      "type": "mental_model",
+      "label": "吸引而非追逐",
+      "summary": "没人会因为喜欢他而喜欢你，别人只会因为被你吸引而靠近你",
+      "content": "你不管是谈恋爱还是打赏，这玩意没技巧，人喜欢你就喜欢，不喜欢你就不喜欢。面对任何关系，先问'我有什么值得对方靠近的理由'，而不是'我怎么更努力地讨好他'。",
+      "triggers": ["喜欢", "追", "舔", "讨好", "吸引", "撩", "表白", "单相思", "暗恋", "没感觉", "忽冷忽热", "不回消息"],
+      "tags": ["恋爱", "人际", "商业", "核心思维"]
+    },
+    {
+      "id": "dt_face_saving_art",
+      "type": "mental_model",
+      "label": "给台阶的艺术",
+      "summary": "人不是不想做，而是需要一个能说服自己的理由——你的工作是给他这个理由",
+      "content": "热水器故事和红包故事的核心：所有说服的本质不是施压，而是给对方一个体面的理由让他自己做决定。这不是操纵，是对人性的尊重。",
+      "triggers": ["拒绝", "不好意思", "尴尬", "怎么开口", "约", "求", "帮忙", "借", "要微信", "搭讪", "说服"],
+      "tags": ["恋爱", "人际", "销售", "核心思维"]
+    },
+    {
+      "id": "dt_scene_growth",
+      "type": "scene",
+      "label": "个人成长图谱",
+      "summary": "迷茫、自律、事业、人生方向的系统思考",
+      "content": "成长的本质不是变成别人想要的样子，而是越来越清楚自己是谁、要什么。当你不再向外界寻求确认时，成长就真正开始了。",
+      "triggers": ["迷茫", "成长", "改变", "提升", "学习", "工作", "赚钱", "未来", "方向"],
+      "tags": ["场景", "成长"]
+    },
+    {
+      "id": "dt_cognitive_reframing",
+      "type": "concept",
+      "label": "认知重构",
+      "summary": "换个视角看问题——所有'问题'都可以被重新定义",
+      "content": "童锦程的很多观点本质上是认知重构：被拒了不是失败是筛选；舔狗不是卑微是主动选择；钱花不掉不是浪费是投资。学会重新定义问题，问题就解决了一半。",
+      "triggers": ["换个角度", "重新定义", "怎么看", "视角", "思维", "认知", "想不通"],
+      "tags": ["元认知", "思维工具"]
+    }
+  ],
+  "edges": [
+    {"source": "dt_attraction_not_pursuit", "target": "dt_signaling", "relation": "related", "description": "炫耀暴露不安全感，降低吸引力"},
+    {"source": "dt_attraction_not_pursuit", "target": "dt_uncertain_love", "relation": "derives_from", "description": "吸引力是双向的，不确定就是没有"},
+    {"source": "dt_signaling", "target": "dt_label_careful", "relation": "derives_from", "description": "标签暴露不安全感，所以要小心给自己贴标签"},
+    {"source": "dt_two_worlds", "target": "dt_attraction_not_pursuit", "relation": "related", "description": "成功改变别人对你的态度，本质是吸引力变了"},
+    {"source": "dt_face_saving_art", "target": "dt_cognitive_reframing", "relation": "derives_from", "description": "给台阶本质上是帮对方做认知重构"},
+    {"source": "dt_simp_paradox", "target": "dt_attraction_not_pursuit", "relation": "contradicts", "description": "不当舔狗 vs 乐意就舔：表面矛盾，核心是主动权"},
+    {"source": "dt_simp_paradox", "target": "dt_cognitive_reframing", "relation": "related", "description": "舔狗悖论是认知重构的经典案例"},
+    {"source": "dt_cognitive_reframing", "target": "dt_scene_growth", "relation": "applies_to", "description": "认知重构是个人成长的核心工具"}
+  ]
+}
