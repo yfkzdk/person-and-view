@@ -7,7 +7,7 @@ from src.emotion import (
     EmotionFusionEngine,
     EmotionState
 )
-from src.emotion.enterprise_emotion import EmotionState as RawEmotionState
+from src.emotion.enterprise_emotion import EnterpriseEmotionState as RawEmotionState
 
 
 class TestTextEmotionAnalyzer:

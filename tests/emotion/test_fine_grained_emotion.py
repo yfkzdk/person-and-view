@@ -208,7 +208,7 @@ def test_fine_grained_analyzer_empty_input():
 # Integration Tests
 # ============================================================================
 
-from src.emotion.enterprise_emotion import TextEmotionAnalyzer, EmotionState
+from src.emotion.enterprise_emotion import TextEmotionAnalyzer, EnterpriseEmotionState
 
 
 def test_integration_with_existing_detector():

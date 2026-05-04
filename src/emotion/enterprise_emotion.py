@@ -20,7 +20,7 @@ def _get_nn():
     return nn
 
 
-class EmotionState:
+class EnterpriseEnterpriseEmotionState:
     """情绪状态"""
     def __init__(self, type: str = 'neutral', intensity: float = 0.5,
                  confidence: float = 0.6, label: str = '平静',
@@ -33,7 +33,7 @@ class EmotionState:
 
 
 class TextEmotionAnalyzer:
-    """文本情绪分析器"""
+    """文本情绪分析器（关键词匹配 fallback 模式，无模型依赖）"""
 
     EMOTION_LABELS = {
         'joy': '快乐',
@@ -45,14 +45,13 @@ class TextEmotionAnalyzer:
         'neutral': '平静'
     }
 
-    def __init__(self, model_name: str = "bert-base-chinese"):
-        # 使用 fallback 模式（关键词匹配），避免 torch 依赖
+    def __init__(self):
         self.use_fallback = True
         self.bert = None
         self.tokenizer = None
         logger.info("TextEmotionAnalyzer initialized (fallback/keyword mode)")
 
-    def analyze(self, text: str) -> EmotionState:
+    def analyze(self, text: str) -> EnterpriseEnterpriseEmotionState:
         """分析文本情绪（关键词匹配 fallback）"""
         emotion_keywords = {
             'joy': ['开心', '高兴', '快乐', '棒', '好', '太好了'],
@@ -70,7 +69,7 @@ class TextEmotionAnalyzer:
                 detected_emotion = emotion_type
                 break
 
-        return EmotionState(
+        return EnterpriseEmotionState(
             type=detected_emotion,
             intensity=0.5,
             confidence=0.6,
@@ -85,9 +84,9 @@ class EmotionFusionEngine:
         self.text_weight = 0.6
         self.audio_weight = 0.4
 
-    def fuse(self, text_emotion, audio_emotion) -> EmotionState:
+    def fuse(self, text_emotion, audio_emotion) -> EnterpriseEmotionState:
         if text_emotion is None and audio_emotion is None:
-            return EmotionState(type='neutral', intensity=0.5, confidence=0.0, label='平静')
+            return EnterpriseEmotionState(type='neutral', intensity=0.5, confidence=0.0, label='平静')
         if text_emotion is None:
             return audio_emotion
         if audio_emotion is None:
@@ -96,7 +95,7 @@ class EmotionFusionEngine:
         if text_emotion.type == audio_emotion.type:
             fused_intensity = text_emotion.intensity * self.text_weight + audio_emotion.intensity * self.audio_weight
             fused_confidence = text_emotion.confidence * self.text_weight + audio_emotion.confidence * self.audio_weight
-            return EmotionState(
+            return EnterpriseEmotionState(
                 type=text_emotion.type, intensity=fused_intensity,
                 confidence=fused_confidence, label=text_emotion.label,
                 secondary_emotions=text_emotion.secondary_emotions
@@ -108,12 +107,12 @@ class EmotionFusionEngine:
 class MultimodalEmotionDetector:
     """多模态情绪检测器"""
 
-    def __init__(self, text_model: str = "bert-base-chinese"):
-        self.text_analyzer = TextEmotionAnalyzer(text_model)
+    def __init__(self):
+        self.text_analyzer = TextEmotionAnalyzer()
         self.fusion_engine = EmotionFusionEngine()
-        self.emotion_history: List[EmotionState] = []
+        self.emotion_history: List[EnterpriseEmotionState] = []
 
-    def detect(self, text: Optional[str] = None, audio_path: Optional[str] = None) -> EmotionState:
+    def detect(self, text: Optional[str] = None, audio_path: Optional[str] = None) -> EnterpriseEmotionState:
         text_emotion = None
         if text:
             text_emotion = self.text_analyzer.analyze(text)

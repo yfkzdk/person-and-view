@@ -364,7 +364,7 @@ class FineGrainedEmotionAnalyzer(nn.Module):
             self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
             self.use_fallback = False
         except Exception as e:
-            # Use fallback mode if BERT fails to load
+            logger.warning(f"BERT model not found locally ({model_name}), using keyword fallback: {e}")
             self.bert = None
             self.tokenizer = None
             self.use_fallback = True
