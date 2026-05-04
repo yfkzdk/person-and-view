@@ -21,11 +21,21 @@ class Settings:
     VAD_THRESHOLD: float = float(os.environ.get("VAD_THRESHOLD", "0.5"))
 
     # TTS 配置
-    TTS_PROVIDER: str = os.environ.get("TTS_PROVIDER", "edge_tts")  # edge_tts 或 cosyvoice
+    TTS_PROVIDER: str = os.environ.get("TTS_PROVIDER", "edge_tts_ssml")  # edge_tts / edge_tts_ssml / openai / volcengine / cosyvoice
     TTS_LANGUAGE: str = os.environ.get("TTS_LANGUAGE", "zh-CN")
     TTS_VOICE: str = os.environ.get("TTS_VOICE", "XiaoxiaoNeural")
     TTS_RATE: float = float(os.environ.get("TTS_RATE", "1.0"))
     TTS_PITCH: int = int(os.environ.get("TTS_PITCH", "0"))
+
+    # OpenAI TTS 配置
+    OPENAI_API_KEY: Optional[str] = os.environ.get("OPENAI_API_KEY")
+    OPENAI_TTS_MODEL: str = os.environ.get("OPENAI_TTS_MODEL", "tts-1")
+    OPENAI_TTS_VOICE: str = os.environ.get("OPENAI_TTS_VOICE", "nova")
+
+    # 火山引擎 (豆包) TTS 配置 — 国内免翻，免费 10万字符/月
+    VOLCENGINE_APP_ID: Optional[str] = os.environ.get("VOLCENGINE_APP_ID")
+    VOLCENGINE_ACCESS_TOKEN: Optional[str] = os.environ.get("VOLCENGINE_ACCESS_TOKEN")
+    VOLCENGINE_TTS_VOICE: str = os.environ.get("VOLCENGINE_TTS_VOICE", "zh_male_chat")
 
     # CosyVoice 配置
     COSYVOICE_MODEL_DIR: str = os.environ.get("COSYVOICE_MODEL_DIR", "")

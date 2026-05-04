@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多知识图谱互联 · 3D水墨星系</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&display=swap');
+        
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #F0EBE1; font-family: 'Noto Serif SC', serif; color: #1A1A1A; user-select: none; }
+        
+        /* 宣纸肌理背景 */
+        body::after {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0;
+            background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="4" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23noise)" opacity="0.06"/><filter id="paper"><feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="2" result="noise"/><feColorMatrix type="matrix" values="1 0 0 0 0.94  0 1 0 0 0.92  0 0 1 0 0.88  0 0 0 0.1 0" in="noise"/></filter><rect width="100%" height="100%" filter="url(%23paper)" opacity="0.5"/></svg>');
+        }
+
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        
+        .ui-layer { position: absolute; z-index: 10; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+
+        /* 右侧面板 */
+        #settings-drawer {
+            top: 20px; right: 20px; width: 360px; height: calc(100% - 40px);
+            background: rgba(240, 235, 225, 0.85); backdrop-filter: blur(12px);
+            border: 1px solid #C0B8A8; box-shadow: -4px 4px 20px rgba(0,0,0,0.15);
+            display: flex; flex-direction: column; overflow: hidden; border-radius: 4px;
+        }
+        
+        .tabs { display: flex; flex-wrap: nowrap; border-bottom: 1px solid #C0B8A8; background: rgba(0,0,0,0.03); }
+        .tab-btn { flex: 1; padding: 12px 5px; text-align: center; cursor: pointer; font-size: 14px; font-weight: bold; border-right: 1px solid #C0B8A8; border-bottom: 2px solid transparent; transition: all 0.3s; color: #666; }
+        .tab-btn:last-child { border-right: none; }
+        .tab-btn.active { background: #F0EBE1; color: #8B1A1A; border-bottom: 2px solid #8B1A1A; }
+        .tab-btn.hidden { display: none; }
+        
+        .tab-content { padding: 20px; flex: 1; overflow-y: auto; display: none; }
+        .tab-content.active { display: block; }
+
+        .panel-section { border: 1px solid #D0C8B8; padding: 15px; margin-bottom: 15px; background: rgba(255,255,255,0.4); border-radius: 4px; }
+        .panel-title { font-size: 15px; font-weight: bold; margin-top: 0; margin-bottom: 10px; border-bottom: 1px dashed #C0B8A8; padding-bottom: 5px; color: #333; }
+        
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px; }
+        .stat-item { background: rgba(0,0,0,0.05); padding: 8px; border-radius: 4px; text-align: center; }
+        .stat-item span { display: block; font-size: 18px; font-weight: bold; color: #8B1A1A; margin-top: 5px; }
+
+        input[type="text"], select { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #A8A090; background: transparent; font-family: inherit; box-sizing: border-box; outline: none; }
+        input[type="text"]:focus, select:focus { border-color: #8B1A1A; }
+        button.btn-primary { width: 100%; padding: 10px; background: #333; color: #F0EBE1; border: none; font-family: inherit; font-size: 14px; cursor: pointer; transition: background 0.3s; margin-top: 5px; border-radius: 2px; }
+        button.btn-primary:hover { background: #8B1A1A; }
+        button.btn-danger { background: transparent; border: 1px solid #8B1A1A; color: #8B1A1A; padding: 4px 8px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+        button.btn-danger:hover { background: #8B1A1A; color: #FFF; }
+
+        /* 滑块样式 */
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
+        input[type=range] { width: 100%; appearance: none; background: #D0C8B8; height: 3px; outline: none; }
+        input[type=range]::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #8B1A1A; cursor: pointer; }
+
+        /* 宏观视角返回按钮 */
+        #btn-back-macro {
+            position: absolute; top: 20px; left: 20px; display: none;
+            padding: 10px 25px; background: rgba(240, 235, 225, 0.95); border: 2px solid #333; color: #333;
+            font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 2px 2px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s; z-index: 20; letter-spacing: 1px;
+        }
+        #btn-back-macro:hover { background: #333; color: #F0EBE1; border-color: #333; }
+
+        /* 3D 节点标签 */
+        .node-label { font-family: 'Noto Serif SC', serif; color: #1A1A1A; font-size: 13px; display: flex; align-items: center; gap: 4px; cursor: pointer; pointer-events: auto; text-shadow: 0px 0px 4px rgba(240, 235, 225, 0.9); transition: opacity 0.3s; }
+        .node-seal { color: #8B1A1A; border: 1px solid #8B1A1A; font-size: 11px; padding: 1px 3px; border-radius: 2px; }
+        .graph-badge { background: #333; color: #F0EBE1; font-size: 11px; padding: 2px 4px; letter-spacing: 1px; border-radius: 2px; }
+        .node-label.disabled { opacity: 0.3 !important; filter: grayscale(100%); }
+        .node-label:hover { z-index: 999; }
+        
+        .node-list { max-height: 200px; overflow-y: auto; border: 1px solid #D0C8B8; padding: 5px; background: rgba(255,255,255,0.2); }
+        .node-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 5px; border-bottom: 1px dashed #C0B8A8; font-size: 13px; }
+        .node-item:last-child { border-bottom: none; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "gsap": "https://unpkg.com/gsap@3.12.5/index.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <button id="btn-back-macro" class="ui-layer interactive"> ⬅ 归复宏观星系</button>
+
+    <div class="ui-layer interactive" id="settings-drawer">
+        <div class="tabs">
+            <div class="tab-btn active" id="tab-btn-macro" data-target="tab-macro">星系总览</div>
+            <div class="tab-btn hidden" id="tab-btn-micro" data-target="tab-micro">微观图谱</div>
+            <div class="tab-btn" id="tab-btn-visual" data-target="tab-visual">视觉调控</div>
+        </div>
+        
+        <div class="tab-content active" id="tab-macro">
+            <div class="panel-section">
+                <h3 class="panel-title">系统生态数据</h3>
+                <div class="stat-grid">
+                    <div class="stat-item">总图谱数<span id="stat-graphs">0</span></div>
+                    <div class="stat-item">全景节点数<span id="stat-nodes">0</span></div>
+                    <div class="stat-item">已禁用节点<span id="stat-cross">0</span></div>
+                    <div class="stat-item">系统活跃度<span>98%</span></div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3 class="panel-title">图谱成员</h3>
+                <div id="graph-member-list" style="font-size:13px;"></div>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-micro">
+            <p style="font-size:14px; margin-top:0; color:#8B1A1A; font-weight:bold;">
+                当前聚焦: <span id="micro-title">无</span>
+            </p>
+            
+            <div class="panel-section">
+                <h3 class="panel-title">孕育新节点 (生成)</h3>
+                <input type="text" id="new-node-name" placeholder="输入节点意象 (如：量子思维)...">
+                <select id="new-node-type">
+                    <option value="mental_model">焦墨 (核心/厚重)</option>
+                    <option value="value">宿墨 (沉淀/价值)</option>
+                    <option value="heuristic">湿墨 (延展/启发)</option>
+                    <option value="concept" selected>淡墨 (概念/基础)</option>
+                    <option value="scene">飞白 (灵感/发散)</option>
+                </select>
+                <button class="btn-primary" id="btn-add-node">落墨结印</button>
+            </div>
+
+            <div class="panel-section">
+                <h3 class="panel-title">图谱节点管理 (删改)</h3>
+                <div class="node-list" id="micro-node-list">
+                    </div>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-visual">
+            <p style="font-size:13px; color:#8B1A1A; margin-top:0; font-weight:bold;">
+                当前调控域: <span id="visual-scope">全局同步</span>
+            </p>
+            <div class="panel-section">
+                <div class="control-group">
+                    <label><span>墨迹温度 (跃动频次)</span> <span id="val-temp">0.7</span></label>
+                    <input type="range" id="sl-temp" min="0" max="2" step="0.1" value="0.7">
+                </div>
+                <div class="control-group">
+                    <label><span>创造力 (飞白碎度)</span> <span id="val-create">0.5</span></label>
+                    <input type="range" id="sl-create" min="0" max="1" step="0.05" value="0.5">
+                </div>
+                <div class="control-group">
+                    <label><span>人格深度 (明暗对比)</span> <span id="val-depth">1.0</span></label>
+                    <input type="range" id="sl-depth" min="0" max="2" step="0.1" value="1.0">
+                </div>
+            </div>
+            <p style="font-size:12px; color:#666; line-height:1.6;">* 在宏观状态下调整将同步所有图谱；进入微观核心后，调整仅作用于当前专属图谱。</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        import gsap from 'gsap';
+
+        // ==========================================
+        // 1. 基础配置与着色器 (GLSL)
+        // ==========================================
+        const TYPE_MAP = {
+            'mental_model': { id: 1, seal: '焦墨', color: '#111111', scale: 2.2, isCore: true },
+            'value': { id: 2, seal: '宿墨', color: '#252525', scale: 1.8, isCore: false },
+            'heuristic': { id: 0, seal: '湿墨', color: '#3A3A3A', scale: 1.4, isCore: false },
+            'concept': { id: 0, seal: '淡墨', color: '#555555', scale: 1.0, isCore: false },
+            'scene': { id: 3, seal: '飞白', color: '#444444', scale: 1.3, isCore: false }
+        };
+
+        const snoiseGLSL = `
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+            float snoise(vec2 v) {
+                const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+                vec2 i  = floor(v + dot(v, C.yy) );
+                vec2 x0 = v -   i + dot(i, C.xx);
+                vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+                vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
+                i = mod289(i); vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
+                vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+                m = m*m; m = m*m;
+                vec3 x = 2.0 * fract(p * C.www) - 1.0; vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5);
+                vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+                vec3 g; g.x  = a0.x  * x0.x  + h.x  * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+                return 130.0 * dot(m, g);
+            }
+        `;
+
+        function createNodeMaterial(config) {
+            return new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uTemperature: { value: config.temperature },
+                    uCreativity: { value: config.creativity },
+                    uPersonaDepth: { value: config.personaDepth },
+                    uGlobalAlpha: { value: 1.0 }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    attribute float aType; attribute float aHover; attribute vec3 aColor; 
+                    attribute float aDisabled; attribute float aCore;
+                    varying float vType; varying float vHover; varying vec3 vColor; 
+                    varying float vDisabled; varying float vCore;
+
+                    void main() {
+                        vUv = uv; vType = aType; vHover = aHover; vColor = aColor; 
+                        vDisabled = aDisabled; vCore = aCore;
+
+                        vec3 cameraRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+                        vec3 cameraUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+                        vec3 pos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+                        
+                        vec3 scale = vec3(length(vec3(instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2])),
+                                          length(vec3(instanceMatrix[1][0], instanceMatrix[1][1], instanceMatrix[1][2])),
+                                          length(vec3(instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2])));
+
+                        if(vCore > 0.5) scale *= 1.8;
+                        vec3 billboardPos = pos + cameraRight * position.x * scale.x + cameraUp * position.y * scale.y;
+                        gl_Position = projectionMatrix * viewMatrix * vec4(billboardPos, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime; uniform float uTemperature; uniform float uCreativity;
+                    uniform float uPersonaDepth; uniform float uGlobalAlpha;
+                    varying vec2 vUv; varying float vType; varying float vHover; varying vec3 vColor; 
+                    varying float vDisabled; varying float vCore;
+                    ${snoiseGLSL}
+                    void main() {
+                        vec2 uv = vUv - 0.5;
+                        float dist = length(uv);
+                        
+                        float coreFreq = mix(1.0, 0.4, vCore); 
+                        float tempAmp = uTemperature * 0.08;
+                        float timeVar = uTime * (0.2 + uCreativity * 0.4) * coreFreq;
+                        
+                        float n = snoise(uv * (4.0 + uTemperature * 8.0) + timeVar) * tempAmp;
+                        float edge = 0.35 + n + (vHover * 0.1) + (uTemperature * 0.05);
+                        
+                        float alpha = 0.0;
+                        vec3 finalColor = vColor;
+                        float depthFactor = mix(0.5, 1.0, mix(vCore, 1.0, vCore)); 
+
+                        if(vCore > 0.5) {
+                            alpha = smoothstep(edge + 0.15, edge - 0.25, dist);
+                            float ring = snoise(uv * 6.0 - timeVar*0.8);
+                            alpha += smoothstep(0.4, 0.2, dist) * smoothstep(0.1, 0.4, dist) * (0.5 + 0.5*ring);
+                        } else {
+                            int typeInt = int(vType + 0.5);
+                            if (typeInt == 0) alpha = smoothstep(edge, edge - 0.15 - vHover*0.1, dist);
+                            else if (typeInt == 1) alpha = smoothstep(edge, edge - 0.02, dist) * (0.5 + 0.5 * snoise(uv * 25.0));
+                            else if (typeInt == 2) { alpha = smoothstep(edge, edge - 0.08, dist); if(dist > edge - 0.1 && dist < edge - 0.02) { alpha += 0.4; finalColor *= 0.5; } }
+                            else if (typeInt == 3) { float breakN = snoise(uv * vec2(20.0 + uCreativity*30.0, 5.0) + timeVar); alpha = smoothstep(edge, edge - 0.1, dist) * smoothstep(0.3, 0.7, breakN + (1.0 - uCreativity)*0.5); }
+                        }
+                        alpha += smoothstep(0.15, 0.0, dist) * 0.8; 
+                        finalColor *= (1.0 - uPersonaDepth * 0.15 * (1.0 - vCore));
+                        if (vDisabled > 0.5) { alpha *= 0.2; finalColor = vec3(0.6); }
+
+                        gl_FragColor = vec4(finalColor, clamp(alpha, 0.0, 1.0) * depthFactor * uGlobalAlpha);
+                    }
+                `,
+                transparent: true, depthWrite: false, blending: THREE.NormalBlending
+            });
+        }
+
+        const lineShaderMat = new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0 }, uGlobalAlpha: { value: 1.0 } },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `uniform float uTime; uniform float uGlobalAlpha; varying vec2 vUv; ${snoiseGLSL}
+                void main() { float n = snoise(vec2(vUv.x * 20.0, vUv.y * 5.0 - uTime * 0.2)); float alpha = smoothstep(-0.1, 0.7, n); float edge = smoothstep(0.0, 0.08, vUv.x) * smoothstep(1.0, 0.92, vUv.x); gl_FragColor = vec4(0.15, 0.15, 0.15, alpha * edge * 0.7 * uGlobalAlpha); }`,
+            transparent: true, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide
+        });
+
+        // ==========================================
+        // 2. 数据结构与场景初始化
+        // ==========================================
+        const SPHERE_RADIUS = 250;
+        const API_HOST = 'http://localhost:8765';
+        const CHARACTER_NAME = '童锦程';
+        const SESSION_ID = 'default';
+        let globalConfig = { temperature: 0.7, creativity: 0.5, personaDepth: 1.0 };
+        let activeGraphId = null;
+        let galaxy = [];
+        let allGraphData = null;  // raw API response cache
+
+        function apiUrl(path) { return `${API_HOST}${path}?session_id=${SESSION_ID}`; }
+
+        async function apiGet(path) {
+            const resp = await fetch(apiUrl(path));
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+            return resp.json();
+        }
+
+        async function apiPost(path, body) {
+            const resp = await fetch(apiUrl(path), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+            return resp.json();
+        }
+
+        async function apiDelete(path) {
+            const resp = await fetch(apiUrl(path), { method: 'DELETE' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+            return resp.json();
+        }
+
+        // Graph layout positions in 3D space (primary at center, supplements orbit)
+        function getGraphWorldPosition(index, total) {
+            if (index === 0) return new THREE.Vector3(0, 0, 0);
+            const orbitRadius = 800 + index * 100;
+            const angle = (index - 1) * (2 * Math.PI / (total - 1 || 1));
+            return new THREE.Vector3(
+                Math.cos(angle) * orbitRadius,
+                Math.sin(angle * 1.3) * orbitRadius * 0.7,
+                Math.sin(angle) * orbitRadius * 0.5
+            );
+        }
+
+        async function loadFromAPI() {
+            const data = await apiGet('/api/knowledge-graph/multi/' + encodeURIComponent(CHARACTER_NAME));
+            allGraphData = data;
+            galaxy = [];
+
+            data.graphs.forEach((g, gi) => {
+                const cfg = g.config || { temperature: 0.7, creativity: 0.5, persona_depth: 1.0 };
+                const worldPos = getGraphWorldPosition(gi, data.graphs.length);
+
+                // Map API nodes to frontend model (no isCore)
+                const nodes = g.nodes.map(n => ({
+                    id: n.id,
+                    type: n.type || 'concept',
+                    label: n.label,
+                    summary: n.summary || '',
+                    content: n.content || '',
+                    triggers: n.triggers || [],
+                    tags: n.tags || [],
+                    disabled: n.disabled || false,
+                    localPos: getSphericalPosition(Math.floor(Math.random() * 100), 100, SPHERE_RADIUS)
+                }));
+
+                // Map API edges to frontend links
+                const links = (g.edges || []).map(e => ({
+                    source: e.source,
+                    target: e.target,
+                    relation: e.relation || 'related',
+                    description: e.description || ''
+                }));
+
+                galaxy.push({
+                    id: g.character,
+                    name: gi === 0 ? g.character : g.character.replace(CHARACTER_NAME + '_', ''),
+                    fullName: g.character,
+                    worldPosition: worldPos,
+                    nodes: nodes,
+                    links: links,
+                    config: {
+                        temperature: cfg.temperature || 0.7,
+                        creativity: cfg.creativity || 0.5,
+                        personaDepth: cfg.persona_depth || 1.0
+                    }
+                });
+            });
+
+            // Sync globalConfig from primary graph
+            if (galaxy.length > 0) {
+                globalConfig = { ...galaxy[0].config };
+            }
+        }
+
+        function generateId() { return Math.random().toString(36).substr(2, 9); }
+
+        function getSphericalPosition(i, n, radius) {
+            const phi = Math.acos(1 - 2 * (i + 0.5) / n);
+            const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
+            return new THREE.Vector3(radius * Math.cos(theta) * Math.sin(phi), radius * Math.sin(theta) * Math.sin(phi), radius * Math.cos(phi));
+        }
+
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2('#F0EBE1', 0.0004);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 5000);
+        camera.position.set(0, 0, 2200);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        container.appendChild(labelRenderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; controls.dampingFactor = 0.05;
+        controls.minDistance = 50; controls.maxDistance = 4000;
+
+        const geometry = new THREE.PlaneGeometry(35, 35);
+        const dummy = new THREE.Object3D();
+        const linesGroup = new THREE.Group(); scene.add(linesGroup);
+
+        // ==========================================
+        // 跨标签页同步 (BroadcastChannel)
+        // ==========================================
+        const bc = new BroadcastChannel('kg-settings-sync');
+        bc.onmessage = async (event) => {
+            const { type } = event.data;
+            if (type === 'configs-changed' || type === 'toggle-changed' || type === 'data-changed') {
+                console.log('[BC] Received:', type, '→ reloading graph data');
+                await reloadGraphData();
+                if (activeGraphId) {
+                    const g = galaxy.find(x => x.id === activeGraphId);
+                    if (g) { syncSliders(g.config); renderMicroNodeList(g); }
+                } else {
+                    syncSliders(globalConfig);
+                }
+            }
+        };
+
+        function broadcastChange(type) {
+            bc.postMessage({ type, timestamp: Date.now() });
+        }
+
+        let cssObjects = [];
+        let interactableMeshes = [];
+
+        // ==========================================
+        // 3. 核心渲染与重建逻辑
+        // ==========================================
+        function populateScene() {
+            cssObjects.forEach(c => { if(c.dom) c.dom.remove(); });
+            cssObjects = [];
+            interactableMeshes.forEach(m => { scene.remove(m); m.material.dispose(); });
+            interactableMeshes = [];
+            while(linesGroup.children.length > 0) {
+                const child = linesGroup.children[0];
+                child.geometry.dispose(); linesGroup.remove(child);
+            }
+
+            galaxy.forEach(graph => {
+                const mat = createNodeMaterial(graph.config);
+                graph.material = mat;
+
+                if(activeGraphId && graph.id !== activeGraphId) mat.uniforms.uGlobalAlpha.value = 0.05;
+
+                const count = graph.nodes.length;
+                const instancedMesh = new THREE.InstancedMesh(geometry, mat, count);
+                instancedMesh.userData = { graphId: graph.id };
+
+                const aType = new Float32Array(count), aHover = new Float32Array(count);
+                const aDisabled = new Float32Array(count), aCore = new Float32Array(count);
+                const aColor = new Float32Array(count * 3);
+                const colorHelper = new THREE.Color();
+
+                graph.nodes.forEach((node, i) => {
+                    const worldPos = node.localPos.clone().add(graph.worldPosition);
+                    node.worldPosition = worldPos;
+
+                    const mapping = TYPE_MAP[node.type] || TYPE_MAP['concept'];
+                    dummy.position.copy(worldPos);
+                    dummy.scale.set(mapping.scale, mapping.scale, 1);
+                    dummy.updateMatrix();
+                    instancedMesh.setMatrixAt(i, dummy.matrix);
+
+                    aType[i] = mapping.id; aHover[i] = 0.0;
+                    aDisabled[i] = node.disabled ? 1.0 : 0.0; aCore[i] = 0.0;
+                    colorHelper.set(mapping.color);
+                    aColor[i * 3] = colorHelper.r; aColor[i * 3 + 1] = colorHelper.g; aColor[i * 3 + 2] = colorHelper.b;
+
+                    const div = document.createElement('div');
+                    div.className = 'node-label' + (node.disabled ? ' disabled' : '');
+                    div.innerHTML = `<span class="node-seal">${mapping.seal}</span> ${node.label}`;
+                    div.dataset.graphId = graph.id; div.dataset.index = i;
+
+                    if(activeGraphId && graph.id !== activeGraphId) div.style.display = 'none';
+
+                    const cssObj = new CSS2DObject(div);
+                    cssObj.position.copy(worldPos);
+                    cssObj.position.add(node.localPos.clone().normalize().multiplyScalar(mapping.scale * 15 + 5));
+                    scene.add(cssObj);
+                    cssObjects.push({ id: node.id, graphId: graph.id, obj: cssObj, dom: div, data: node, index: i });
+                });
+
+                instancedMesh.geometry.setAttribute('aType', new THREE.InstancedBufferAttribute(aType, 1));
+                instancedMesh.geometry.setAttribute('aHover', new THREE.InstancedBufferAttribute(aHover, 1));
+                instancedMesh.geometry.setAttribute('aDisabled', new THREE.InstancedBufferAttribute(aDisabled, 1));
+                instancedMesh.geometry.setAttribute('aCore', new THREE.InstancedBufferAttribute(aCore, 1));
+                instancedMesh.geometry.setAttribute('aColor', new THREE.InstancedBufferAttribute(aColor, 3));
+
+                scene.add(instancedMesh);
+                interactableMeshes.push(instancedMesh);
+                graph.instancedMesh = instancedMesh;
+
+                // Graph anchor label (clickable entry to micro view)
+                const anchorDiv = document.createElement('div');
+                anchorDiv.className = 'node-label';
+                anchorDiv.innerHTML = `<span class="graph-badge">${graph.name}</span>`;
+                anchorDiv.style.cursor = 'pointer';
+                anchorDiv.style.fontWeight = 'bold';
+                anchorDiv.style.fontSize = '16px';
+                anchorDiv.dataset.graphId = graph.id;
+                anchorDiv.dataset.isAnchor = 'true';
+
+                if(activeGraphId && graph.id !== activeGraphId) anchorDiv.style.display = 'none';
+
+                const anchorObj = new CSS2DObject(anchorDiv);
+                anchorObj.position.copy(graph.worldPosition);
+                scene.add(anchorObj);
+                cssObjects.push({ id: '__anchor__', graphId: graph.id, obj: anchorObj, dom: anchorDiv, data: { isAnchor: true, disabled: false }, index: -1 });
+
+                // Build edges
+                graph.links.forEach(link => {
+                    const sNode = graph.nodes.find(n => n.id === link.source);
+                    const tNode = graph.nodes.find(n => n.id === link.target);
+                    if (!sNode || !tNode) return;
+                    const v1 = sNode.worldPosition, v2 = tNode.worldPosition;
+                    const mid = v1.clone().lerp(v2, 0.5).add(v1.clone().sub(graph.worldPosition).normalize().multiplyScalar(v1.distanceTo(v2) * 0.2));
+                    const curve = new THREE.QuadraticBezierCurve3(v1, mid, v2);
+
+                    const tubeMat = lineShaderMat.clone();
+                    if(activeGraphId && graph.id !== activeGraphId) tubeMat.uniforms.uGlobalAlpha.value = 0.05;
+                    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 15, 0.6, 4, false), tubeMat);
+                    tube.userData = { graphId: graph.id };
+                    linesGroup.add(tube);
+                });
+            });
+
+            updateMacroStats();
+        }
+
+        // ==========================================
+        // 4. 交互与宏观/微观切换
+        // ==========================================
+        const raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+        let hoveredObj = { graphId: null, index: -1 };
+
+        window.addEventListener('mousemove', (e) => {
+            if(e.target.closest('.ui-layer')) return;
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            // 严格过滤：若处于微观，仅允许交互当前图谱的物体
+            const testMeshes = activeGraphId ? interactableMeshes.filter(m => m.userData.graphId === activeGraphId) : interactableMeshes;
+            const intersects = raycaster.intersectObjects(testMeshes);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                const gId = hit.object.userData.graphId;
+                
+                if (hoveredObj.index !== hit.instanceId || hoveredObj.graphId !== gId) {
+                    if (hoveredObj.graphId) updateHoverState(hoveredObj.graphId, hoveredObj.index, 0.0);
+                    hoveredObj = { graphId: gId, index: hit.instanceId };
+                    updateHoverState(hoveredObj.graphId, hoveredObj.index, 1.0);
+                    document.body.style.cursor = 'pointer';
+                }
+            } else if (hoveredObj.graphId) {
+                updateHoverState(hoveredObj.graphId, hoveredObj.index, 0.0);
+                hoveredObj = { graphId: null, index: -1 };
+                document.body.style.cursor = 'default';
+            }
+        });
+
+        function updateHoverState(graphId, index, value) {
+            const g = galaxy.find(x => x.id === graphId);
+            if(!g || !g.instancedMesh) return;
+            const aHover = g.instancedMesh.geometry.attributes.aHover;
+            gsap.to({v: aHover.array[index]}, {
+                v: value, duration: 0.3,
+                onUpdate: function() { aHover.array[index] = this.targets()[0].v; aHover.needsUpdate = true; }
+            });
+            cssObjects.forEach(obj => {
+                if(obj.graphId === graphId && !obj.data.disabled) {
+                    if(value === 1.0 && obj.index !== index) obj.dom.style.opacity = '0.3';
+                    else if(value === 0.0) obj.dom.style.opacity = '1';
+                }
+            });
+        }
+
+        // 双击图锚点进入微观，或点击锚点标签
+        window.addEventListener('dblclick', () => {
+            if(hoveredObj.graphId) {
+                const g = galaxy.find(x => x.id === hoveredObj.graphId);
+                if(g && activeGraphId !== g.id) focusOnGraph(g.id);
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            const label = e.target.closest('.node-label');
+            if(label && !activeGraphId) {
+                const gId = label.dataset.graphId;
+                const isAnchor = label.dataset.isAnchor === 'true';
+                if(isAnchor) focusOnGraph(gId);
+            }
+        });
+
+        function focusOnGraph(gId) {
+            activeGraphId = gId;
+            const g = galaxy.find(x => x.id === gId);
+            if (!g) return;
+
+            const targetCam = g.worldPosition.clone().add(new THREE.Vector3(0, 0, SPHERE_RADIUS + 350));
+            gsap.to(camera.position, { x: targetCam.x, y: targetCam.y, z: targetCam.z, duration: 1.5, ease: "power3.inOut" });
+            gsap.to(controls.target, { x: g.worldPosition.x, y: g.worldPosition.y, z: g.worldPosition.z, duration: 1.5, ease: "power3.inOut" });
+
+            galaxy.forEach(graph => {
+                if(graph.material) gsap.to(graph.material.uniforms.uGlobalAlpha, { value: (graph.id === gId) ? 1.0 : 0.05, duration: 1.0 });
+            });
+            linesGroup.children.forEach(child => {
+                gsap.to(child.material.uniforms.uGlobalAlpha, { value: child.userData.graphId === gId ? 1.0 : 0.05, duration: 1.0 });
+            });
+
+            document.getElementById('btn-back-macro').style.display = 'block';
+            document.getElementById('tab-btn-macro').classList.add('hidden');
+            document.getElementById('tab-btn-micro').classList.remove('hidden');
+            document.getElementById('visual-scope').innerText = `独立图谱 [${g.name}]`;
+            document.getElementById('micro-title').innerText = g.fullName || g.name;
+            switchTab('tab-micro');
+
+            syncSliders(g.config);
+            renderMicroNodeList(g);
+
+            cssObjects.forEach(obj => {
+                if(obj.graphId !== gId) obj.dom.style.display = 'none';
+            });
+        }
+
+        document.getElementById('btn-back-macro').addEventListener('click', () => {
+            activeGraphId = null;
+            gsap.to(camera.position, { x: 0, y: 0, z: 2200, duration: 1.8, ease: "power3.inOut" });
+            gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.8, ease: "power3.inOut" });
+
+            galaxy.forEach(graph => {
+                if(graph.material) gsap.to(graph.material.uniforms.uGlobalAlpha, { value: 1.0, duration: 1.0 });
+                graph.config.temperature = globalConfig.temperature;
+                graph.config.creativity = globalConfig.creativity;
+                graph.config.personaDepth = globalConfig.personaDepth;
+                if(graph.material) {
+                    graph.material.uniforms.uTemperature.value = globalConfig.temperature;
+                    graph.material.uniforms.uCreativity.value = globalConfig.creativity;
+                    graph.material.uniforms.uPersonaDepth.value = globalConfig.personaDepth;
+                }
+            });
+            linesGroup.children.forEach(child => gsap.to(child.material.uniforms.uGlobalAlpha, { value: 1.0, duration: 1.0 }));
+
+            document.getElementById('btn-back-macro').style.display = 'none';
+            document.getElementById('tab-btn-macro').classList.remove('hidden');
+            document.getElementById('tab-btn-micro').classList.add('hidden');
+            document.getElementById('visual-scope').innerText = '全局同步';
+            switchTab('tab-macro');
+
+            syncSliders(globalConfig);
+            cssObjects.forEach(obj => { obj.dom.style.display = 'flex'; });
+            updateMacroStats();
+        });
+
+        // ==========================================
+        // 5. UI 面板逻辑 (CRUD & Stats) - 全部对接后端 API
+        // ==========================================
+        function switchTab(targetId) {
+            document.querySelectorAll('.tab-btn, .tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelector(`[data-target="${targetId}"]`).classList.add('active');
+            document.getElementById(targetId).classList.add('active');
+        }
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.target)));
+
+        function updateMacroStats() {
+            let nCount = 0, disabledCount = 0;
+            galaxy.forEach(g => {
+                nCount += g.nodes.length;
+                g.nodes.forEach(n => { if (n.disabled) disabledCount++; });
+            });
+            document.getElementById('stat-graphs').innerText = galaxy.length;
+            document.getElementById('stat-nodes').innerText = nCount;
+            document.getElementById('stat-cross').innerText = disabledCount;
+
+            // Render graph member list
+            const memberList = document.getElementById('graph-member-list');
+            if (!memberList) return;
+            let html = '';
+            galaxy.forEach((g, i) => {
+                const isPrimary = i === 0;
+                html += `<div style="padding:8px 5px;border-bottom:1px dashed #C0B8A8;display:flex;justify-content:space-between;align-items:center;
+                    ${isPrimary ? 'background:rgba(0,0,0,0.05);' : ''}">
+                    <span>${isPrimary ? '★ ' : ''}${g.name} ${isPrimary ? '(主)' : ''}</span>
+                    <span style="font-size:11px;color:#666;">${g.nodes.length}节点 · ${g.links.length}边 · t=${g.config.temperature.toFixed(1)}</span>
+                </div>`;
+            });
+            memberList.innerHTML = html;
+        }
+
+        // 视觉滑块绑定 - 宏观同步所有图谱，微观只改当前图谱
+        function syncSliders(conf) {
+            document.getElementById('sl-temp').value = conf.temperature; document.getElementById('val-temp').innerText = conf.temperature.toFixed(1);
+            document.getElementById('sl-create').value = conf.creativity; document.getElementById('val-create').innerText = conf.creativity.toFixed(2);
+            document.getElementById('sl-depth').value = conf.personaDepth; document.getElementById('val-depth').innerText = conf.personaDepth.toFixed(1);
+        }
+
+        async function pushConfigs(graphName, config) {
+            const body = { configs: { [graphName]: { temperature: config.temperature, creativity: config.creativity, persona_depth: config.personaDepth } } };
+            try { await apiPost('/api/knowledge-graph/multi/' + encodeURIComponent(CHARACTER_NAME) + '/configs', body); } catch(e) { console.warn('API config push failed:', e); }
+        }
+
+        let _sliderDebounce = {};
+        ['temp:temperature:uTemperature', 'create:creativity:uCreativity', 'depth:personaDepth:uPersonaDepth'].forEach(map => {
+            const [id, confKey, uniKey] = map.split(':');
+            document.getElementById('sl-'+id).addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                document.getElementById('val-'+id).innerText = val.toFixed(val < 1 ? 2 : 1);
+                if (activeGraphId) {
+                    const g = galaxy.find(x => x.id === activeGraphId);
+                    g.config[confKey] = val; if(g.material) g.material.uniforms[uniKey].value = val;
+                    clearTimeout(_sliderDebounce[id]);
+                    _sliderDebounce[id] = setTimeout(() => pushConfigs(g.fullName || g.id, g.config), 400);
+                } else {
+                    globalConfig[confKey] = val;
+                    galaxy.forEach(g => { g.config[confKey] = val; if(g.material) g.material.uniforms[uniKey].value = val; });
+                    clearTimeout(_sliderDebounce[id]);
+                    _sliderDebounce[id] = setTimeout(() => {
+                        const configs = {};
+                        galaxy.forEach(g => { configs[g.fullName || g.id] = { temperature: g.config.temperature, creativity: g.config.creativity, persona_depth: g.config.personaDepth }; });
+                        apiPost('/api/knowledge-graph/multi/' + encodeURIComponent(CHARACTER_NAME) + '/configs', { configs }).catch(e => console.warn('Macro sync failed:', e));
+                    }, 400);
+                }
+            });
+        });
+
+        // 微观节点列表
+        function renderMicroNodeList(g) {
+            const listObj = document.getElementById('micro-node-list');
+            listObj.innerHTML = '';
+            g.nodes.forEach(node => {
+                listObj.innerHTML += `
+                    <div class="node-item">
+                        <span style="${node.disabled ? 'text-decoration:line-through;color:#999' : ''}">${node.label}</span>
+                        <div>
+                            <button class="btn-danger" onclick="window.toggleNode('${g.id}','${node.id}')">${node.disabled ? '启用' : '禁用'}</button>
+                            <button class="btn-danger" onclick="window.deleteNode('${g.id}','${node.id}')">化墨</button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // 新增节点 → API
+        document.getElementById('btn-add-node').addEventListener('click', async () => {
+            const name = document.getElementById('new-node-name').value.trim() || '未名之念';
+            const type = document.getElementById('new-node-type').value;
+            if(!activeGraphId) return;
+            const g = galaxy.find(x => x.id === activeGraphId);
+            if (!g) return;
+
+            try {
+                await apiPost('/api/knowledge-graph/' + encodeURIComponent(g.fullName || g.id) + '/nodes', {
+                    label: name, type: type, summary: name, content: '',
+                    triggers: [name], tags: []
+                });
+                await reloadGraphData();
+                renderMicroNodeList(galaxy.find(x => x.id === activeGraphId));
+                document.getElementById('new-node-name').value = '';
+            } catch(e) { console.error('Create node failed:', e); alert('创建节点失败: ' + e.message); }
+        });
+
+        // 删除节点 → API
+        window.deleteNode = async (gId, nId) => {
+            const g = galaxy.find(x => x.id === gId);
+            if (!g) return;
+            try {
+                await apiDelete('/api/knowledge-graph/' + encodeURIComponent(g.fullName || g.id) + '/nodes/' + encodeURIComponent(nId));
+                await reloadGraphData();
+                const updatedG = galaxy.find(x => x.id === gId);
+                if (updatedG) renderMicroNodeList(updatedG);
+            } catch(e) { console.error('Delete node failed:', e); alert('删除失败: ' + e.message); }
+        };
+
+        // 切换节点启用状态 → API
+        window.toggleNode = async (gId, nId) => {
+            const g = galaxy.find(x => x.id === gId);
+            if (!g) return;
+            const node = g.nodes.find(n => n.id === nId);
+            if (!node) return;
+            const newEnabled = !node.disabled;
+            try {
+                await apiPost('/api/knowledge-graph/multi/' + encodeURIComponent(CHARACTER_NAME) + '/toggle', { node_id: nId, enabled: newEnabled });
+                await reloadGraphData();
+                const updatedG = galaxy.find(x => x.id === gId);
+                if (updatedG) renderMicroNodeList(updatedG);
+            } catch(e) { console.error('Toggle failed:', e); alert('切换失败: ' + e.message); }
+        };
+
+        async function reloadGraphData() {
+            if (!allGraphData) return;
+            const data = await apiGet('/api/knowledge-graph/multi/' + encodeURIComponent(CHARACTER_NAME));
+            allGraphData = data;
+
+            // Update galaxy in place
+            data.graphs.forEach((g, gi) => {
+                const existingGraph = galaxy.find(x => x.fullName === g.character || x.id === g.character);
+                if (!existingGraph) return;
+                const cfg = g.config || { temperature: 0.7, creativity: 0.5, persona_depth: 1.0 };
+                const nodes = g.nodes.map(n => ({
+                    id: n.id, type: n.type || 'concept', label: n.label,
+                    summary: n.summary || '', content: n.content || '',
+                    triggers: n.triggers || [], tags: n.tags || [],
+                    disabled: n.disabled || false,
+                    localPos: getSphericalPosition(Math.floor(Math.random() * 100), 100, SPHERE_RADIUS)
+                }));
+                const links = (g.edges || []).map(e => ({
+                    source: e.source, target: e.target, relation: e.relation || 'related', description: e.description || ''
+                }));
+                existingGraph.nodes = nodes;
+                existingGraph.links = links;
+                existingGraph.config = {
+                    temperature: cfg.temperature || 0.7,
+                    creativity: cfg.creativity || 0.5,
+                    personaDepth: cfg.persona_depth || 1.0
+                };
+            });
+            populateScene();
+            broadcastChange('data-changed');
+        }
+
+        // ==========================================
+        // 6. 主渲染循环
+        // ==========================================
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+
+            galaxy.forEach(g => { if (g.material) g.material.uniforms.uTime.value = time; });
+            linesGroup.children.forEach(c => { if(c.material.uniforms) c.material.uniforms.uTime.value = time; });
+
+            if (!activeGraphId) {
+                scene.rotation.y += 0.0004;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 初始化执行
+        (async function init() {
+            try {
+                await loadFromAPI();
+                populateScene();
+                animate();
+            } catch(e) {
+                console.error('Failed to load from API:', e);
+                document.body.innerHTML += `<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999;background:#fff;padding:30px;border:2px solid #8B1A1A;text-align:center;">
+                    <h2>无法连接后端</h2><p>请确保服务器运行在 ${API_HOST}</p><p style="color:#999;font-size:12px;">${e.message}</p>
+                    <button onclick="location.reload()" style="padding:10px 30px;margin-top:15px;background:#333;color:#fff;border:none;cursor:pointer;">重试</button>
+                </div>`;
+            }
+        })();
+    </script>
+</body>
+</html>

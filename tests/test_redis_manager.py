@@ -97,8 +97,8 @@ async def test_redis_manager_connect_disconnect():
     """测试连接和断开"""
     manager = RedisStateManager(use_redis=False)
 
+    # 应该没有异常，且 disconnect 后状态正确
     await manager.connect()
+    assert manager._redis is None  # use_redis=False 时不初始化 Redis
     await manager.disconnect()
-
-    # 应该没有异常
-    assert True
+    assert not manager._connected

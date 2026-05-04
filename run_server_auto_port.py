@@ -3,10 +3,9 @@ FastAPI WebSocket 服务器启动脚本 - 自动选择可用端口
 """
 import sys
 import os
-import socket
 
 # 添加项目根目录到Python路径
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
 # 设置UTF-8编码
@@ -440,18 +439,6 @@ def cleanup_session(session_id: str):
     if session_id in dialogue_managers:
         del dialogue_managers[session_id]
     logger.info(f"[Session {session_id}] Resources cleaned up")
-
-
-def find_available_port(start_port=8000, max_attempts=100):
-    """查找可用端口"""
-    for port in range(start_port, start_port + max_attempts):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('', port))
-                return port
-        except OSError:
-            continue
-    return None
 
 
 if __name__ == "__main__":

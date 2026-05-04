@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-KG Backend Debug Panel</title>
+<style>
+  :root { --bg: #1a1a2e; --panel: #16213e; --border: #0f3460; --accent: #e94560; --text: #eaeaea; --dim: #888; --green: #4ecca3; --warn: #f0a500; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Consolas', 'Courier New', monospace; background: var(--bg); color: var(--text); min-height: 100vh; }
+  #app { display: flex; height: 100vh; }
+
+  /* Sidebar */
+  #sidebar { width: 260px; background: var(--panel); border-right: 1px solid var(--border); padding: 20px 0; display: flex; flex-direction: column; }
+  #sidebar h2 { padding: 0 20px 15px; font-size: 16px; color: var(--accent); border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  #sidebar .config-row { padding: 8px 20px; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  #sidebar .config-row label { color: var(--dim); min-width: 70px; }
+  #sidebar .config-row input, #sidebar .config-row select { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; font-family: inherit; font-size: 12px; border-radius: 3px; }
+  #sidebar nav { flex: 1; padding: 10px 0; }
+  #sidebar nav a { display: block; padding: 10px 20px; color: var(--dim); text-decoration: none; font-size: 13px; transition: all 0.2s; border-left: 2px solid transparent; }
+  #sidebar nav a:hover, #sidebar nav a.active { color: var(--text); background: rgba(233,69,96,0.1); border-left-color: var(--accent); }
+  #sidebar .status { padding: 15px 20px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--border); }
+  #sidebar .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  #sidebar .status .dot.on { background: var(--green); }
+  #sidebar .status .dot.off { background: var(--accent); }
+
+  /* Main */
+  #main { flex: 1; overflow-y: auto; padding: 30px; }
+  .section { display: none; }
+  .section.active { display: block; }
+  .section h3 { font-size: 18px; color: var(--accent); margin-bottom: 8px; }
+  .section > p.desc { font-size: 12px; color: var(--dim); margin-bottom: 20px; }
+
+  /* Cards */
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+  .card h4 { font-size: 14px; margin-bottom: 12px; color: var(--green); }
+  .card .endpoint { font-size: 11px; color: var(--warn); margin-bottom: 12px; font-family: inherit; }
+
+  /* Forms */
+  .form-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; }
+  .form-group label { font-size: 10px; color: var(--dim); text-transform: uppercase; }
+  .form-group input, .form-group select, .form-group textarea { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; font-family: inherit; font-size: 13px; border-radius: 3px; }
+  .form-group textarea { min-height: 60px; resize: vertical; }
+  button { background: var(--accent); color: #fff; border: none; padding: 7px 18px; font-family: inherit; font-size: 12px; cursor: pointer; border-radius: 3px; transition: opacity 0.2s; font-weight: bold; }
+  button:hover { opacity: 0.85; }
+  button.small { padding: 4px 10px; font-size: 11px; }
+  button.green { background: var(--green); color: #000; }
+  button.dim { background: var(--border); }
+
+  /* Response area */
+  .response { margin-top: 12px; border-radius: 6px; padding: 14px 16px; font-size: 12px; max-height: 500px; overflow: auto; white-space: pre-wrap; word-break: break-all; min-height: 48px; display: flex; align-items: flex-start; gap: 10px; }
+  .response::before { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .response.idle { background: rgba(255,255,255,0.02); border: 1px dashed var(--border); color: var(--dim); }
+  .response.idle::before { content: '⏳'; }
+  .response.loading { background: rgba(240,165,0,0.08); border: 1px solid var(--warn); color: var(--warn); }
+  .response.loading::before { content: '🔄'; }
+  .response.ok { background: rgba(78,204,163,0.08); border: 1px solid var(--green); color: var(--green); }
+  .response.ok::before { content: '✅'; }
+  .response.error { background: rgba(233,69,96,0.08); border: 1px solid var(--accent); color: var(--accent); }
+  .response.error::before { content: '❌'; }
+
+  /* Toast */
+  #toast { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .toast-item { padding: 12px 20px; border-radius: 6px; font-size: 13px; font-family: inherit; animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s forwards; pointer-events: auto; max-width: 420px; }
+  .toast-item.ok { background: #0a3a2a; border: 1px solid var(--green); color: var(--green); }
+  .toast-item.error { background: #3a0a0a; border: 1px solid var(--accent); color: var(--accent); }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-10px); } }
+
+  /* Stats grid */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 15px; text-align: center; }
+  .stat .val { font-size: 28px; font-weight: bold; color: var(--green); }
+  .stat .lbl { font-size: 11px; color: var(--dim); margin-top: 4px; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 8px 10px; background: rgba(233,69,96,0.15); color: var(--accent); font-size: 11px; text-transform: uppercase; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(255,255,255,0.03); }
+  .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; }
+  .badge-mental_model { background: #111; color: #fff; }
+  .badge-value { background: #252525; color: #fff; }
+  .badge-heuristic { background: #3a3a3a; color: #fff; }
+  .badge-concept { background: #555; color: #fff; }
+  .badge-scene { background: #444; color: #fff; }
+  .badge-supports { background: #4ecca3; color: #000; }
+  .badge-derives_from { background: #3498db; color: #fff; }
+  .badge-contradicts { background: #e94560; color: #fff; }
+  .badge-applies_to { background: #f0a500; color: #000; }
+  .badge-related { background: #666; color: #fff; }
+  .disabled-row { opacity: 0.35; text-decoration: line-through; }
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<div id="app">
+  <div id="sidebar">
+    <h2>KG Debug Panel</h2>
+    <div class="config-row">
+      <label>角色:</label>
+      <input type="text" id="cfg-character" value="童锦程">
+    </div>
+    <div class="config-row">
+      <label>Session:</label>
+      <input type="text" id="cfg-session" value="default">
+    </div>
+    <div class="config-row">
+      <label>Host:</label>
+      <input type="text" id="cfg-host" value="http://localhost:8765">
+    </div>
+    <nav>
+      <a href="#" data-section="sec-overview" class="active">总览 Overview</a>
+      <a href="#" data-section="sec-graphs">图谱数据 Graphs</a>
+      <a href="#" data-section="sec-configs">配置管理 Configs</a>
+      <a href="#" data-section="sec-toggle">节点开关 Toggle</a>
+      <a href="#" data-section="sec-nodes">节点 CRUD</a>
+      <a href="#" data-section="sec-edges">边 CRUD</a>
+      <a href="#" data-section="sec-evolution">进化日志 Evolution</a>
+      <a href="#" data-section="sec-raw">原始 JSON</a>
+    </nav>
+    <div class="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">检测中...</span>
+    </div>
+  </div>
+
+  <div id="main">
+    <!-- OVERVIEW -->
+    <div class="section active" id="sec-overview">
+      <h3>系统总览</h3>
+      <p class="desc">Multi-KG 状态一览。页面加载时自动拉取。</p>
+      <div class="stats" id="overview-stats"></div>
+      <div class="card">
+        <h4>图谱列表</h4>
+        <div id="overview-graphs"></div>
+      </div>
+    </div>
+
+    <!-- GRAPHS DETAIL -->
+    <div class="section" id="sec-graphs">
+      <h3>图谱数据</h3>
+      <p class="desc">每个图谱的节点和边详情。</p>
+      <div id="graphs-detail"></div>
+    </div>
+
+    <!-- CONFIGS -->
+    <div class="section" id="sec-configs">
+      <h3>配置管理</h3>
+      <p class="desc">查看和修改 per-graph 配置（temperature / creativity / persona_depth）。</p>
+      <div class="card">
+        <h4>当前配置</h4>
+        <div class="endpoint">GET /api/knowledge-graph/multi/{character}/configs</div>
+        <button onclick="loadConfigs()">刷新配置</button>
+        <div class="response" id="resp-configs-get" style="display:none;"></div>
+      </div>
+      <div class="card">
+        <h4>更新配置</h4>
+        <div class="endpoint">POST /api/knowledge-graph/multi/{character}/configs</div>
+        <p style="font-size:11px;color:var(--dim);margin-bottom:10px;">格式: {"configs": {"图谱名": {"temperature": 0.8, "creativity": 0.6, "persona_depth": 1.2}}}</p>
+        <div class="form-row">
+          <div class="form-group"><label>Graph Name</label><input type="text" id="cfg-graph-name" placeholder="童锦程_行为动力学" style="width:200px;"></div>
+          <div class="form-group"><label>Temperature</label><input type="number" id="cfg-temperature" value="0.7" step="0.1" min="0" max="2" style="width:80px;"></div>
+          <div class="form-group"><label>Creativity</label><input type="number" id="cfg-creativity" value="0.5" step="0.05" min="0" max="1" style="width:80px;"></div>
+          <div class="form-group"><label>Persona Depth</label><input type="number" id="cfg-persona-depth" value="1.0" step="0.1" min="0" max="2" style="width:80px;"></div>
+          <button onclick="updateConfig()">更新</button>
+        </div>
+        <div class="response" id="resp-configs-post" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- TOGGLE -->
+    <div class="section" id="sec-toggle">
+      <h3>节点开关</h3>
+      <p class="desc">禁用/启用节点。禁用的节点在 LLM 激活时被排除。</p>
+      <div class="card">
+        <h4>切换节点状态</h4>
+        <div class="endpoint">POST /api/knowledge-graph/multi/{character}/toggle</div>
+        <div class="form-row">
+          <div class="form-group"><label>Node ID</label><input type="text" id="toggle-node-id" placeholder="attraction_principle" style="width:250px;"></div>
+          <div class="form-group"><label>Enabled</label><select id="toggle-enabled"><option value="true">启用</option><option value="false">禁用</option></select></div>
+          <button onclick="toggleNode()">执行</button>
+        </div>
+        <div class="response" id="resp-toggle" style="display:none;"></div>
+      </div>
+      <div class="card">
+        <h4>快速切换 — 所有节点</h4>
+        <p style="font-size:11px;color:var(--dim);margin-bottom:10px;">从图谱数据中加载节点列表后显示。先去"图谱数据"页加载。</p>
+        <div id="toggle-node-list"></div>
+      </div>
+    </div>
+
+    <!-- NODE CRUD -->
+    <div class="section" id="sec-nodes">
+      <h3>节点 CRUD</h3>
+      <p class="desc">创建/编辑节点。</p>
+      <div class="card">
+        <h4>新建 / 更新节点</h4>
+        <div class="endpoint">POST /api/knowledge-graph/{graph_name}/nodes</div>
+        <div class="form-row">
+          <div class="form-group"><label>Graph Name</label><input type="text" id="node-graph" placeholder="童锦程" style="width:160px;"></div>
+          <div class="form-group"><label>Node ID (留空=新建)</label><input type="text" id="node-id" placeholder="留空自动生成" style="width:180px;"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Label (名称)</label><input type="text" id="node-label" placeholder="吸引力原则" style="width:180px;"></div>
+          <div class="form-group"><label>Type</label><select id="node-type"><option value="mental_model">mental_model</option><option value="value">value</option><option value="heuristic">heuristic</option><option value="concept" selected>concept</option><option value="scene">scene</option></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Summary</label><input type="text" id="node-summary" placeholder="简短摘要" style="width:400px;"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Content</label><textarea id="node-content" placeholder="详细内容" style="width:400px;"></textarea></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Triggers (逗号分隔)</label><input type="text" id="node-triggers" placeholder="吸引力, 忽冷忽热, 女生" style="width:300px;"></div>
+          <div class="form-group"><label>Tags (逗号分隔)</label><input type="text" id="node-tags" placeholder="恋爱策略, 核心" style="width:200px;"></div>
+        </div>
+        <button onclick="upsertNode()">保存节点</button>
+        <div class="response" id="resp-node" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- EDGE CRUD -->
+    <div class="section" id="sec-edges">
+      <h3>边 CRUD</h3>
+      <p class="desc">创建/编辑图谱内连线。</p>
+      <div class="card">
+        <h4>新建 / 更新边</h4>
+        <div class="endpoint">POST /api/knowledge-graph/{graph_name}/edges</div>
+        <div class="form-row">
+          <div class="form-group"><label>Graph Name</label><input type="text" id="edge-graph" placeholder="童锦程" style="width:160px;"></div>
+          <div class="form-group"><label>Relation</label><select id="edge-relation"><option value="supports">supports</option><option value="derives_from">derives_from</option><option value="contradicts">contradicts</option><option value="applies_to">applies_to</option><option value="related" selected>related</option></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Source Node ID</label><input type="text" id="edge-source" placeholder="attraction_principle" style="width:220px;"></div>
+          <div class="form-group"><label>Target Node ID</label><input type="text" id="edge-target" placeholder="give_exit" style="width:220px;"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Description</label><input type="text" id="edge-desc" placeholder="边描述" style="width:400px;"></div>
+        </div>
+        <button onclick="upsertEdge()">保存边</button>
+        <div class="response" id="resp-edge" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- EVOLUTION LOG -->
+    <div class="section" id="sec-evolution">
+      <h3>进化日志</h3>
+      <p class="desc">闭环自进化：空白发现 → 知识补充 → 一致性守卫 → 确认注入。</p>
+
+      <!-- 健康状态 -->
+      <div class="card">
+        <h4>健康状态 Health</h4>
+        <div class="stats" id="evo-health"></div>
+        <div style="margin-top:10px;">
+          <button class="small green" onclick="triggerEvolution()">手动触发进化检测</button>
+          <button class="small dim" onclick="cleanupEvolution()">清理进化历史</button>
+        </div>
+      </div>
+
+      <!-- 待确认变更 -->
+      <div class="card">
+        <h4>待确认变更 Pending Candidates</h4>
+        <div class="endpoint">POST /api/evolution/{character}/confirm · reject</div>
+        <div id="evo-pending" style="margin-top:10px;"><p style="color:var(--dim);">加载中...</p></div>
+      </div>
+
+      <!-- 进化历史 -->
+      <div class="card">
+        <h4>进化历史 History（最近 20 条）</h4>
+        <div id="evo-history" style="margin-top:10px;"><p style="color:var(--dim);">加载中...</p></div>
+      </div>
+
+      <div class="response" id="resp-evolution" style="display:none;"></div>
+    </div>
+
+    <!-- RAW JSON -->
+    <div class="section" id="sec-raw">
+      <h3>原始 JSON 输出</h3>
+      <p class="desc">GET /api/knowledge-graph/multi/{character} 的完整响应，按图谱分组可折叠。</p>
+      <button onclick="loadRawJson()">加载数据</button>
+      <div class="response" id="resp-raw" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== UTILS ==========
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function apiBase() {
+  const host = $('cfg-host').value.replace(/\/+$/, '');
+  const character = encodeURIComponent($('cfg-character').value);
+  const session = $('cfg-session').value;
+  return { host, character, session, url: (path) => `${host}${path}?session_id=${session}` };
+}
+
+async function apiGet(path) {
+  const { url } = apiBase();
+  const resp = await fetch(url(path));
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  return resp.json();
+}
+
+async function apiPost(path, body) {
+  const { url } = apiBase();
+  const resp = await fetch(url(path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  return resp.json();
+}
+
+function showResp(elId, ok, text) {
+  const el = $(elId);
+  if (!el) return;
+  el.className = 'response ' + (ok ? 'ok' : 'error');
+  el.innerHTML = '<span></span>' + (typeof text === 'string' ? text : JSON.stringify(text, null, 2));
+  el.style.display = 'flex';
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function toast(msg, ok) {
+  const t = document.createElement('div');
+  t.className = 'toast-item ' + (ok ? 'ok' : 'error');
+  t.textContent = msg;
+  $('toast').appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// Init all response areas to idle state
+function initResponses() {
+  $$('.response').forEach(el => {
+    if (!el.className.includes('ok') && !el.className.includes('error') && !el.className.includes('loading')) {
+      el.className = 'response idle';
+      el.innerHTML = '<span></span>等待操作...';
+      el.style.display = 'flex';
+    }
+  });
+}
+
+// ========== NAVIGATION ==========
+$$('#sidebar nav a').forEach(a => {
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    $$('#sidebar nav a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+    $$('.section').forEach(s => s.classList.remove('active'));
+    $(a.dataset.section).classList.add('active');
+    if (a.dataset.section === 'sec-overview') loadOverview();
+    if (a.dataset.section === 'sec-graphs') loadGraphsDetail();
+    if (a.dataset.section === 'sec-evolution') loadEvolution();
+  });
+});
+
+// ========== HEALTH CHECK ==========
+async function healthCheck() {
+  try {
+    const d = await apiGet('/api/knowledge-graph/multi/' + encodeURIComponent($('cfg-character').value));
+    $('status-dot').className = 'dot on';
+    $('status-text').textContent = `在线 · ${d.graphs.length} 图谱 · ${d.total_nodes} 节点`;
+    return d;
+  } catch(e) {
+    $('status-dot').className = 'dot off';
+    $('status-text').textContent = '离线 · ' + e.message;
+    return null;
+  }
+}
+
+// ========== OVERVIEW ==========
+async function loadOverview() {
+  const d = await healthCheck();
+  if (!d) return;
+
+  $('overview-stats').innerHTML = `
+    <div class="stat"><div class="val">${d.graphs.length}</div><div class="lbl">图谱数</div></div>
+    <div class="stat"><div class="val">${d.total_nodes}</div><div class="lbl">总节点</div></div>
+    <div class="stat"><div class="val">${d.total_edges}</div><div class="lbl">总边</div></div>
+    <div class="stat"><div class="val">${d.graphs[0]?.character || '-'}</div><div class="lbl">主图谱</div></div>
+  `;
+
+  let html = '';
+  d.graphs.forEach((g, i) => {
+    const isPrimary = i === 0;
+    const shortName = g.character.replace($('cfg-character').value + '_', '');
+    const disabledCount = g.nodes.filter(n => n.disabled).length;
+    html += `
+      <div style="padding:10px;margin:6px 0;background:rgba(255,255,255,0.03);border-radius:4px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <strong>${isPrimary ? '★ ' : ''}${shortName}</strong>
+          <span style="color:var(--dim);font-size:11px;margin-left:10px;">${g.nodes.length} 节点 · ${g.edges.length} 边 · 禁用 ${disabledCount}</span>
+        </div>
+        <div style="font-size:11px;color:var(--dim);">
+          t=${g.config.temperature} c=${g.config.creativity} d=${g.config.persona_depth}
+        </div>
+      </div>`;
+  });
+  $('overview-graphs').innerHTML = html;
+}
+
+// ========== GRAPHS DETAIL ==========
+async function loadGraphsDetail() {
+  const d = await healthCheck();
+  if (!d) return;
+
+  const typeNames = { mental_model:'焦墨', value:'宿墨', heuristic:'湿墨', concept:'淡墨', scene:'飞白' };
+  const relNames = { supports:'支撑', derives_from:'派生', contradicts:'矛盾', applies_to:'适用', related:'关联' };
+
+  let html = '';
+  d.graphs.forEach((g, gi) => {
+    const shortName = g.character.replace($('cfg-character').value + '_', '');
+    html += `<div class="card"><h4>${gi === 0 ? '★ ' : ''}${shortName} <span style="font-size:11px;color:var(--dim);">(${g.character})</span></h4>`;
+
+    // Nodes table
+    html += `<p style="font-size:12px;color:var(--warn);margin:10px 0;">节点 (${g.nodes.length})</p>`;
+    html += `<table><thead><tr><th>ID</th><th>Label</th><th>Type</th><th>Summary</th><th>Triggers</th><th>Disabled</th></tr></thead><tbody>`;
+    g.nodes.forEach(n => {
+      html += `<tr class="${n.disabled ? 'disabled-row' : ''}">
+        <td style="font-size:10px;">${n.id}</td>
+        <td>${n.label}</td>
+        <td><span class="badge badge-${n.type}">${typeNames[n.type] || n.type}</span></td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${n.summary || '-'}</td>
+        <td style="font-size:10px;">${(n.triggers || []).slice(0,3).join(', ')}</td>
+        <td>${n.disabled ? '❌' : '✅'}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+
+    // Edges table
+    html += `<p style="font-size:12px;color:var(--warn);margin:15px 0 10px;">边 (${g.edges.length})</p>`;
+    html += `<table><thead><tr><th>Source</th><th>Relation</th><th>Target</th><th>Description</th></tr></thead><tbody>`;
+    g.edges.forEach(e => {
+      const sLabel = g.nodes.find(n => n.id === e.source)?.label || e.source;
+      const tLabel = g.nodes.find(n => n.id === e.target)?.label || e.target;
+      html += `<tr>
+        <td>${sLabel} <span style="font-size:10px;color:var(--dim);">(${e.source})</span></td>
+        <td><span class="badge badge-${e.relation}">${relNames[e.relation] || e.relation}</span></td>
+        <td>${tLabel} <span style="font-size:10px;color:var(--dim);">(${e.target})</span></td>
+        <td style="font-size:11px;">${e.description || '-'}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  });
+  $('graphs-detail').innerHTML = html;
+
+  // Also populate quick-toggle list
+  let toggleHtml = '';
+  d.graphs.forEach(g => {
+    const shortName = g.character.replace($('cfg-character').value + '_', '');
+    toggleHtml += `<p style="font-size:12px;color:var(--warn);margin:10px 0;">${shortName}</p>`;
+    g.nodes.forEach(n => {
+      toggleHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;">
+        <span class="${n.disabled ? 'disabled-row' : ''}">${n.label} <span style="font-size:10px;color:var(--dim);">${n.id}</span></span>
+        <button class="small ${n.disabled ? 'green' : 'dim'}" onclick="quickToggle('${n.id}', ${!n.disabled})">${n.disabled ? '启用' : '禁用'}</button>
+      </div>`;
+    });
+  });
+  $('toggle-node-list').innerHTML = toggleHtml;
+}
+
+async function quickToggle(nodeId, enabled) {
+  const el = $('resp-toggle');
+  el.className = 'response loading'; el.innerHTML = '<span></span>切换中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/knowledge-graph/multi/' + encodeURIComponent($('cfg-character').value) + '/toggle', { node_id: nodeId, enabled });
+    showResp('resp-toggle', true, 'OK: ' + JSON.stringify(d));
+    toast(`节点 → ${enabled ? '启用' : '禁用'}`, true);
+    loadGraphsDetail();
+  } catch(e) { showResp('resp-toggle', false, e.message); toast('切换失败', false); }
+}
+
+// ========== CONFIGS ==========
+async function loadConfigs() {
+  const el = $('resp-configs-get');
+  el.className = 'response loading'; el.innerHTML = '<span></span>请求中...'; el.style.display = 'flex';
+  try {
+    const d = await apiGet('/api/knowledge-graph/multi/' + encodeURIComponent($('cfg-character').value) + '/configs');
+    showResp('resp-configs-get', true, d);
+    toast('配置已刷新', true);
+  } catch(e) { showResp('resp-configs-get', false, e.message); toast('获取失败', false); }
+}
+
+async function updateConfig() {
+  const graphName = $('cfg-graph-name').value.trim();
+  if (!graphName) { showResp('resp-configs-post', false, '请输入 Graph Name'); return; }
+  const body = {
+    configs: {
+      [graphName]: {
+        temperature: parseFloat($('cfg-temperature').value),
+        creativity: parseFloat($('cfg-creativity').value),
+        persona_depth: parseFloat($('cfg-persona-depth').value)
+      }
+    }
+  };
+  const el = $('resp-configs-post');
+  el.className = 'response loading'; el.innerHTML = '<span></span>更新中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/knowledge-graph/multi/' + encodeURIComponent($('cfg-character').value) + '/configs', body);
+    showResp('resp-configs-post', true, d);
+    toast(`已更新 ${graphName} 配置`, true);
+  } catch(e) { showResp('resp-configs-post', false, e.message); toast('更新失败', false); }
+}
+
+// ========== TOGGLE ==========
+async function toggleNode() {
+  const nodeId = $('toggle-node-id').value.trim();
+  const enabled = $('toggle-enabled').value === 'true';
+  if (!nodeId) { showResp('resp-toggle', false, '请输入 Node ID'); return; }
+  const el = $('resp-toggle');
+  el.className = 'response loading'; el.innerHTML = '<span></span>切换中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/knowledge-graph/multi/' + encodeURIComponent($('cfg-character').value) + '/toggle', { node_id: nodeId, enabled });
+    showResp('resp-toggle', true, d);
+    toast(`节点 → ${enabled ? '启用' : '禁用'}`, true);
+  } catch(e) { showResp('resp-toggle', false, e.message); toast('切换失败', false); }
+}
+
+// ========== NODE CRUD ==========
+async function upsertNode() {
+  const graphName = $('node-graph').value.trim();
+  if (!graphName) { showResp('resp-node', false, '请输入 Graph Name'); return; }
+  const body = {
+    label: $('node-label').value.trim() || '未命名',
+    type: $('node-type').value,
+    summary: $('node-summary').value.trim(),
+    content: $('node-content').value.trim(),
+    triggers: $('node-triggers').value.split(',').map(s => s.trim()).filter(Boolean),
+    tags: $('node-tags').value.split(',').map(s => s.trim()).filter(Boolean)
+  };
+  const nodeId = $('node-id').value.trim();
+  if (nodeId) body.id = nodeId;
+  const el = $('resp-node');
+  el.className = 'response loading'; el.innerHTML = '<span></span>保存中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/knowledge-graph/' + encodeURIComponent(graphName) + '/nodes', body);
+    showResp('resp-node', true, d);
+    toast(`节点已保存`, true);
+    if (!nodeId) $('node-id').value = d.id || '';
+  } catch(e) { showResp('resp-node', false, e.message); toast('保存失败', false); }
+}
+
+// ========== EDGE CRUD ==========
+async function upsertEdge() {
+  const graphName = $('edge-graph').value.trim();
+  const source = $('edge-source').value.trim();
+  const target = $('edge-target').value.trim();
+  if (!graphName || !source || !target) { showResp('resp-edge', false, '请填写 Graph Name, Source, Target'); return; }
+  const body = {
+    source, target,
+    relation: $('edge-relation').value,
+    description: $('edge-desc').value.trim()
+  };
+  const el = $('resp-edge');
+  el.className = 'response loading'; el.innerHTML = '<span></span>保存中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/knowledge-graph/' + encodeURIComponent(graphName) + '/edges', body);
+    showResp('resp-edge', true, d);
+    toast('边已保存', true);
+  } catch(e) { showResp('resp-edge', false, e.message); toast('保存失败', false); }
+}
+
+// ========== RAW JSON ==========
+async function loadRawJson() {
+  const el = $('resp-raw');
+  el.className = 'response loading'; el.innerHTML = '<span></span>加载中...'; el.style.display = 'flex';
+  try {
+    const d = await apiGet('/api/knowledge-graph/multi/' + encodeURIComponent($('cfg-character').value));
+    showResp('resp-raw', true, d);
+    toast('数据已加载', true);
+  } catch(e) { showResp('resp-raw', false, e.message); toast('加载失败', false); }
+}
+
+// ========== EVOLUTION ==========
+async function loadEvolution() {
+  const el = $('resp-evolution');
+  el.className = 'response loading'; el.innerHTML = '<span></span>加载进化状态...'; el.style.display = 'flex';
+  try {
+    const d = await apiGet('/api/evolution/' + encodeURIComponent($('cfg-character').value) + '/status');
+    showResp('resp-evolution', true, 'OK');
+    renderEvolutionHealth(d.health);
+    renderEvolutionPending(d.pending);
+    renderEvolutionHistory(d.history);
+  } catch(e) {
+    showResp('resp-evolution', false, e.message);
+    $('evo-health').innerHTML = '<div class="stat"><div class="val">--</div><div class="lbl">连接失败</div></div>';
+    $('evo-pending').innerHTML = '<p style="color:var(--accent);">加载失败: ' + e.message + '</p>';
+    $('evo-history').innerHTML = '';
+  }
+}
+
+function renderEvolutionHealth(h) {
+  if (!h) return;
+  const locked = h.locked ? ' (已锁定)' : '';
+  $('evo-health').innerHTML = `
+    <div class="stat"><div class="val">${h.total_evolution_nodes} / ${h.max_evolution_nodes}${locked}</div><div class="lbl">进化节点数</div></div>
+    <div class="stat"><div class="val">${h.pending_count}</div><div class="lbl">待确认</div></div>
+    <div class="stat"><div class="val">${h.signal_buffer_size}</div><div class="lbl">信号缓冲</div></div>
+    <div class="stat"><div class="val">${h.next_evolution_in}</div><div class="lbl">下次进化倒计时</div></div>
+    <div class="stat"><div class="val">${h.blacklist_count}</div><div class="lbl">黑名单</div></div>
+  `;
+}
+
+function renderEvolutionPending(pending) {
+  if (!pending || pending.length === 0) {
+    $('evo-pending').innerHTML = '<p style="color:var(--dim);">暂无待确认候选。</p>';
+    return;
+  }
+  let html = '';
+  pending.forEach((c, i) => {
+    const check = c._check || {};
+    const passed = check.passed;
+    const checkBadge = passed
+      ? '<span class="badge badge-supports">通过守卫</span>'
+      : '<span class="badge badge-contradicts">' + Object.values(check.checks || {}).join(', ') + '</span>';
+    const suggestions = check.suggestions || [];
+    const sourceSkill = c._source_skill ? ` · 来源: ${c._source_skill}` : '';
+    const gapConcept = c._gap_concept ? ` · 空白: ${c._gap_concept}` : '';
+
+    html += `<div style="padding:12px;margin:8px 0;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="font-size:14px;">${c.label || '(未命名)'}</strong>
+        <span>${checkBadge}</span>
+      </div>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:4px;">${c.summary || ''}</div>
+      <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">Triggers: ${(c.triggers || []).join(', ') || '-'} | Tags: ${(c.tags || []).join(', ') || '-'}</div>
+      <div style="font-size:10px;color:var(--dim);margin-bottom:4px;">${sourceSkill}${gapConcept}</div>
+      ${suggestions.length ? '<div style="font-size:10px;color:var(--warn);margin-bottom:8px;">⚠ ' + suggestions.join('; ') + '</div>' : ''}
+      <div style="display:flex;gap:8px;">
+        <button class="small green" onclick="confirmCandidate(${i})" ${!passed ? 'disabled style="opacity:0.4;"' : ''}>确认注入</button>
+        <button class="small dim" onclick="rejectCandidate(${i})">拒绝</button>
+        ${!passed ? '<span style="font-size:10px;color:var(--accent);align-self:center;">未通过守卫，无法注入</span>' : ''}
+      </div>
+    </div>`;
+  });
+  $('evo-pending').innerHTML = html;
+}
+
+function renderEvolutionHistory(history) {
+  if (!history || history.length === 0) {
+    $('evo-history').innerHTML = '<p style="color:var(--dim);">暂无进化历史。</p>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Node Label</th><th>Type</th><th>Source Gap</th><th>Skill</th><th>Turn</th></tr></thead><tbody>';
+  history.forEach(h => {
+    const n = h.node || {};
+    html += `<tr>
+      <td>${n.label || '-'}</td>
+      <td><span class="badge badge-${n.type || 'concept'}">${n.type || 'concept'}</span></td>
+      <td>${h.source_gap || '-'}</td>
+      <td style="font-size:10px;">${n._source_skill || '-'}</td>
+      <td>${h.confirmed_at_turn || '-'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  $('evo-history').innerHTML = html;
+}
+
+async function confirmCandidate(index) {
+  const el = $('resp-evolution');
+  el.className = 'response loading'; el.innerHTML = '<span></span>确认注入中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/evolution/' + encodeURIComponent($('cfg-character').value) + '/confirm', { candidate_index: index });
+    showResp('resp-evolution', true, d);
+    toast('节点已注入', true);
+    loadEvolution();
+    // Notify other tabs
+    bc.postMessage({ type: 'data-changed' });
+  } catch(e) { showResp('resp-evolution', false, e.message); toast('注入失败', false); }
+}
+
+async function rejectCandidate(index) {
+  const el = $('resp-evolution');
+  el.className = 'response loading'; el.innerHTML = '<span></span>拒绝中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/evolution/' + encodeURIComponent($('cfg-character').value) + '/reject', { candidate_index: index });
+    showResp('resp-evolution', true, d);
+    toast(`已拒绝 → 冷却 ${d.cooldown_turns} 轮`, true);
+    loadEvolution();
+  } catch(e) { showResp('resp-evolution', false, e.message); toast('拒绝失败', false); }
+}
+
+async function triggerEvolution() {
+  const el = $('resp-evolution');
+  el.className = 'response loading'; el.innerHTML = '<span></span>手动触发进化...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/evolution/' + encodeURIComponent($('cfg-character').value) + '/trigger', {});
+    showResp('resp-evolution', true, d);
+    toast(d.reason, d.triggered);
+    loadEvolution();
+  } catch(e) { showResp('resp-evolution', false, e.message); toast('触发失败', false); }
+}
+
+async function cleanupEvolution() {
+  const el = $('resp-evolution');
+  el.className = 'response loading'; el.innerHTML = '<span></span>清理中...'; el.style.display = 'flex';
+  try {
+    const d = await apiPost('/api/evolution/' + encodeURIComponent($('cfg-character').value) + '/cleanup', {});
+    showResp('resp-evolution', true, d);
+    toast(`已移除 ${d.removed} 条历史`, true);
+    loadEvolution();
+  } catch(e) { showResp('resp-evolution', false, e.message); toast('清理失败', false); }
+}
+
+// ========== BroadcastChannel (cross-tab sync with 3D view) ==========
+const bc = new BroadcastChannel('kg-settings-sync');
+bc.onmessage = (event) => {
+  const { type } = event.data;
+  if (type === 'configs-changed' || type === 'toggle-changed' || type === 'data-changed') {
+    console.log('[BC DebugPanel] Received:', type, '→ reloading');
+    loadOverview();
+    if ($('sec-graphs').classList.contains('active')) loadGraphsDetail();
+    if ($('sec-configs').classList.contains('active')) loadConfigs();
+  }
+};
+
+// ========== INIT ==========
+initResponses();
+loadOverview();
+healthCheck();
+</script>
+</body>
+</html>

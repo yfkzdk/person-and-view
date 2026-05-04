@@ -10,8 +10,9 @@
 - 高级蒸馏功能
 """
 import asyncio
-from typing import AsyncIterator, Dict, Optional, List
+import time
 import logging
+from typing import AsyncIterator, Dict, Optional, List
 import copy
 
 from src.models.character_card import CharacterCard, CharacterCardManager
@@ -20,9 +21,9 @@ from src.emotion.emotion_aware_dialogue import EmotionAwareResponder, EmotionSta
 from src.llm.llm_router import LLMRouter
 from src.llm.context_manager import ContextManager
 from src.models.llm_config import LLMConfig
-from src.tts.tts_streamer import get_tts_audio, get_tts_format
+from src.tts.tts_streamer import get_tts_audio, get_tts_format, create_streaming_synthesizer
 from src.tts.voice_profile_manager import VoiceProfileManager
-from src.config import settings
+from src.config import settings as app_settings
 from src.utils.advanced_person_distiller import AdvancedPersonDistiller, SelfMemory, PersonaLayer
 from src.vad.interrupt_handler import VADInterruptException
 from src.conversation.conversation_state import ConversationStateMachine, ConversationPhase
@@ -67,7 +68,7 @@ class DialogueManager:
             self.memory = SmartMemorySystem(
                 max_short_term_turns=30,
                 storage_dir=f"memory/{character_name}",
-                auto_save=settings.MEMORY_AUTO_SAVE
+                auto_save=app_settings.MEMORY_AUTO_SAVE
             )
             self.memory.load_from_file()
         else:
@@ -81,10 +82,10 @@ class DialogueManager:
 
         # 4. LLM router
         llm_config = LLMConfig(
-            api_key=settings.DEEPSEEK_API_KEY,
-            model_name=settings.DEEPSEEK_MODEL,
-            max_tokens=settings.LLM_MAX_TOKENS,
-            temperature=settings.LLM_TEMPERATURE
+            api_key=app_settings.DEEPSEEK_API_KEY,
+            model_name=app_settings.DEEPSEEK_MODEL,
+            max_tokens=app_settings.LLM_MAX_TOKENS,
+            temperature=app_settings.LLM_TEMPERATURE
         )
         context_manager = ContextManager()
         self.llm_router = LLMRouter(config=llm_config, context_manager=context_manager)
@@ -167,6 +168,10 @@ class DialogueManager:
             self.state_machine.transition(ConversationPhase.LISTENING)
             self.state_machine.update_topic(user_input)
 
+            # 0.5 记录本轮开始时间（自进化反馈采集用）
+            self._turn_start_time = time.time()
+            activated = []  # KG 激活结果，feed into _collect_feedback
+
             # 1. Emotion analysis (LLM-based multi-dimensional weights)
             self.state_machine.transition(ConversationPhase.UNDERSTANDING)
             emotion_context = None
@@ -213,18 +218,24 @@ class DialogueManager:
 
             # 2.5 Knowledge graph activation — 网状角色知识 (支持单/多图谱)
             knowledge_context = None
+            kg_effective_config = {}  # per-graph configs weighted by activation
             if self.knowledge_graph:
-                # Sync disabled nodes from settings
+                # Sync disabled nodes + per-graph configs from settings (set by REST API / debug panel)
                 if settings:
                     disabled = settings.get("knowledge", {}).get("disabled_nodes", [])
                     if disabled:
                         self.knowledge_graph.set_disabled_nodes(disabled)
+                    # Bridge: REST API configs → DialogueManager's KG instance
+                    if self.use_multi_kg:
+                        saved_configs = settings.get("knowledge", {}).get("graph_configs", {})
+                        if saved_configs:
+                            self.knowledge_graph.set_all_configs(saved_configs)
                 activated = self.knowledge_graph.activate(user_input)
                 if activated:
+                    knowledge_context = self.knowledge_graph.get_context(activated)
+                    # Collect per-graph effective config weighted by activation scores
                     if self.use_multi_kg:
-                        knowledge_context = self.knowledge_graph.get_context(activated)
-                    else:
-                        knowledge_context = self.knowledge_graph.get_context(activated)
+                        kg_effective_config = self._compute_kg_effective_config(activated)
 
             # Combine emotion + memory + knowledge into one context string (capped)
             combined_context = None
@@ -241,12 +252,24 @@ class DialogueManager:
                 max_ctx_chars = 800
                 if settings:
                     max_ctx_chars = settings.get("memory", {}).get("context_chars", 800)
+                # persona_depth scales context window (1.0 = 100%, 2.0 = 200%)
+                persona_depth = kg_effective_config.get("persona_depth", 1.0)
+                max_ctx_chars = int(max_ctx_chars * persona_depth)
                 if len(combined_context) > max_ctx_chars:
                     combined_context = combined_context[:max_ctx_chars] + "…"
 
-            # 3. LLM streaming generation
+            # 3. Start streaming TTS synthesizer early (connection overlaps with LLM)
+            synth = None
+            synth_task = None
+            if return_audio and self.enable_tts and app_settings.TTS_PROVIDER.lower() == "volcengine":
+                voice = self.voice_profile.get("voice") if self.voice_profile else None
+                rate = self.voice_profile.get("rate") if self.voice_profile else None
+                synth_task = asyncio.create_task(create_streaming_synthesizer(voice=voice, speed=rate))
+
+            # 4. LLM streaming generation with sentence boundary detection
             self.state_machine.transition(ConversationPhase.RESPONDING)
             full_response = []
+            sentence_buffer = []
 
             # Apply settings overrides for temperature / max_tokens
             llm_temperature = None
@@ -259,6 +282,22 @@ class DialogueManager:
                 len_map = {"short": 300, "medium": 800, "long": 2000}
                 llm_max_tokens = len_map.get(resp_len, 800)
 
+            # Multi-KG per-graph config overrides
+            if kg_effective_config:
+                kg_temp = kg_effective_config.get("temperature")
+                if kg_temp is not None:
+                    llm_temperature = kg_temp
+                creativity = kg_effective_config.get("creativity", 0.5)
+                if llm_temperature is not None:
+                    llm_temperature = llm_temperature * (0.5 + creativity)
+
+            # Await synthesizer connection before starting LLM
+            if synth_task:
+                try:
+                    synth = await synth_task
+                except Exception as e:
+                    logger.error(f"Streaming synthesizer failed: {e}")
+
             async for chunk in self.llm_router.chat(
                 user_input,
                 context=combined_context,
@@ -266,16 +305,33 @@ class DialogueManager:
                 max_tokens=llm_max_tokens
             ):
                 if interrupt_handler and interrupt_handler.is_interrupted():
+                    if synth:
+                        await synth._cleanup()
                     yield {"type": "interrupted"}
                     raise VADInterruptException("User interrupted")
 
                 full_response.append(chunk)
+                sentence_buffer.append(chunk)
 
                 yield {
                     "type": "text_chunk",
                     "content": chunk,
                     "is_final": False
                 }
+
+                # Feed complete sentences to TTS as they form
+                if synth:
+                    text_so_far = "".join(sentence_buffer)
+                    last_boundary = -1
+                    for i, ch in enumerate(text_so_far):
+                        if ch in '。！？\n':
+                            last_boundary = i
+
+                    if last_boundary >= 0:
+                        sentence = text_so_far[:last_boundary + 1].strip()
+                        if sentence:
+                            await synth.feed_sentence(sentence)
+                        sentence_buffer = [text_so_far[last_boundary + 1:]]
 
             # 标记文本完成
             full_text = "".join(full_response)
@@ -285,26 +341,56 @@ class DialogueManager:
                 "is_final": True
             }
 
-            # 4. TTS语音合成 - 使用角色绑定的声音配置
+            # 5. TTS: drain streaming audio or fall back to batch synthesis
             if return_audio and self.enable_tts:
                 self.state_machine.transition(ConversationPhase.SPEAKING)
                 audio_format = get_tts_format()
-                voice = self.voice_profile.get("voice") if self.voice_profile else None
-                rate = self.voice_profile.get("rate") if self.voice_profile else None
-                pitch = self.voice_profile.get("pitch") if self.voice_profile else None
-                style = self.voice_profile.get("style") if self.voice_profile else None
 
-                async for audio_chunk in get_tts_audio(full_text, voice=voice, rate=rate, pitch=pitch, style=style):
-                    if interrupt_handler and interrupt_handler.is_interrupted():
-                        yield {"type": "interrupted"}
-                        raise VADInterruptException("User interrupted")
+                if synth:
+                    # Streaming path: feed remaining text, finish, drain audio
+                    try:
+                        remaining = "".join(sentence_buffer).strip()
+                        if remaining:
+                            await synth.feed_sentence(remaining)
+                        await synth.finish()
 
-                    yield {
-                        "type": "audio",
-                        "data": audio_chunk,
-                        "format": audio_format,
-                        "is_final": False
-                    }
+                        async for audio_chunk in synth.flush():
+                            if interrupt_handler and interrupt_handler.is_interrupted():
+                                yield {"type": "interrupted"}
+                                raise VADInterruptException("User interrupted")
+                            yield {
+                                "type": "audio",
+                                "data": audio_chunk,
+                                "format": audio_format,
+                                "is_final": False
+                            }
+                    finally:
+                        await synth._cleanup()
+                else:
+                    # Fallback: batch synthesis (edge_tts, openai, cosyvoice, or volcengine w/o streaming)
+                    voice = self.voice_profile.get("voice") if self.voice_profile else None
+                    rate = self.voice_profile.get("rate") if self.voice_profile else None
+                    pitch = self.voice_profile.get("pitch") if self.voice_profile else None
+                    style = self.voice_profile.get("style") if self.voice_profile else None
+
+                    async for audio_chunk in get_tts_audio(
+                        full_text,
+                        voice=voice,
+                        rate=rate,
+                        pitch=pitch,
+                        style=style,
+                        emotion=self.current_emotion.primary_emotion if self.current_emotion else "neutral"
+                    ):
+                        if interrupt_handler and interrupt_handler.is_interrupted():
+                            yield {"type": "interrupted"}
+                            raise VADInterruptException("User interrupted")
+
+                        yield {
+                            "type": "audio",
+                            "data": audio_chunk,
+                            "format": audio_format,
+                            "is_final": False
+                        }
 
                 # 标记音频完成
                 yield {
@@ -328,6 +414,14 @@ class DialogueManager:
                 "response": full_text,
                 "emotion": self.current_emotion.primary_emotion if self.current_emotion else None
             }
+
+            # 7. 采集反馈信号 (自进化系统)
+            self._collect_feedback(
+                user_input=user_input,
+                full_text=full_text,
+                activated_nodes=activated if activated else [],
+                settings=settings
+            )
 
         except VADInterruptException:
             # Rollback to last stable state, preserving pending input
@@ -387,7 +481,7 @@ class DialogueManager:
             self.memory = SmartMemorySystem(
                 max_short_term_turns=30,
                 storage_dir=f"memory/{character_name}",
-                auto_save=settings.MEMORY_AUTO_SAVE
+                auto_save=app_settings.MEMORY_AUTO_SAVE
             )
             self.memory.load_from_file()
 
@@ -416,6 +510,162 @@ class DialogueManager:
             self.memory.clear_short_term()
 
         self.llm_router.reset_context()
+
+    def _collect_feedback(
+        self,
+        user_input: str,
+        full_text: str,
+        activated_nodes: List,
+        settings: Optional[Dict] = None
+    ):
+        """采集本轮对话的隐式反馈信号，写入 session_settings 中的 signal_buffer。
+
+        Caller: chat() — 每轮对话结束后自动调用。
+        无异常传播：采集失败静默丢弃，不影响对话主流程。
+        """
+        try:
+            if settings is None:
+                return
+
+            # 确保 evolution 存储结构存在
+            if "knowledge" not in settings:
+                settings["knowledge"] = {}
+            knowledge = settings["knowledge"]
+            if "evolution" not in knowledge:
+                knowledge["evolution"] = {
+                    "signal_buffer": [],
+                    "evolution_round": 0,
+                    "pending": [],
+                    "history": [],
+                    "rejected_blacklist": {}
+                }
+            evo = knowledge["evolution"]
+
+            # --- 采集隐式信号 ---
+            now = time.time()
+            turn_start = getattr(self, "_turn_start_time", now)
+            reply_interval_ms = int((now - turn_start) * 1000) if turn_start else 0
+            user_words = len(user_input)
+            response_words = len(full_text)
+
+            # 追问检测
+            followup_keywords = ["为什么", "怎么", "然后呢", "但是", "那如果", "具体呢", "举个例子", "什么意思"]
+            followup_detected = any(kw in user_input for kw in followup_keywords)
+            matched_followup = [kw for kw in followup_keywords if kw in user_input]
+
+            # 情绪变化
+            prev_emotion = getattr(self, "_last_turn_emotion", None)
+            current_primary = self.current_emotion.primary_emotion if self.current_emotion else "neutral"
+            emotion_shift = 0.0
+            if prev_emotion and prev_emotion != current_primary:
+                # 简单标记情绪是否发生变化（精确 shift 由 emotion_responder 在后续增强）
+                emotion_shift = 0.6 if followup_detected else 0.3
+
+            # 截断检测
+            truncated = response_words >= 490  # max_tokens ~500 时接近截断
+
+            # 已激活节点 ID 列表
+            activated_ids = []
+            if activated_nodes:
+                activated_ids = [n.id if hasattr(n, 'id') else n[0].id for n in activated_nodes]
+
+            signal = {
+                "turn": evo.get("_turn_counter", 0) + 1,
+                "activated_nodes": activated_ids,
+                "user_words": user_words,
+                "response_words": response_words,
+                "reply_interval_ms": reply_interval_ms,
+                "followup_detected": followup_detected,
+                "followup_keywords": matched_followup,
+                "user_snippet": user_input[:100],
+                "emotion_shift": emotion_shift,
+                "truncated": truncated,
+                "explicit": None  # None | "like" | "dislike"
+            }
+
+            # 写入 buffer，保留最近 50 轮
+            evo["signal_buffer"].append(signal)
+            if len(evo["signal_buffer"]) > 50:
+                evo["signal_buffer"] = evo["signal_buffer"][-50:]
+            evo["_turn_counter"] = signal["turn"]
+
+            # 更新情绪追踪
+            self._last_turn_emotion = current_primary
+
+            # 触发自动进化检测（每 15 轮检查一次）
+            self._maybe_trigger_evolution(settings)
+
+        except Exception:
+            pass  # 反馈采集失败不影响对话
+
+    def _maybe_trigger_evolution(self, settings: Dict):
+        """在信号采集后检查是否需要触发进化检测。非阻塞，失败静默。"""
+        try:
+            from src.memory.evolution_engine import run_evolution_cycle
+            evo = settings.get("knowledge", {}).get("evolution", {})
+            turn_counter = evo.get("_turn_counter", 0)
+            last_evo = evo.get("_last_evolution_turn", 0)
+
+            # 只有距上次进化超过触发间隔时才执行
+            if turn_counter - last_evo < 15:
+                return
+
+            # 收集已有节点/边供一致性检查
+            all_nodes, all_edges = {}, []
+            if self.use_multi_kg and hasattr(self.knowledge_graph, 'get_all_nodes_and_edges'):
+                all_nodes, all_edges = self.knowledge_graph.get_all_nodes_and_edges()
+            elif hasattr(self, 'knowledge_graph') and self.knowledge_graph:
+                all_nodes = getattr(self.knowledge_graph, 'nodes', {})
+                all_edges = getattr(self.knowledge_graph, 'edges', [])
+
+            run_evolution_cycle(
+                settings=settings,
+                character_name=self.character.name if self.character else "童锦程",
+                force=False,
+                existing_nodes=all_nodes,
+                existing_edges=all_edges
+            )
+        except Exception:
+            pass  # 进化检测失败不影响对话
+
+    def _compute_kg_effective_config(self, activated: List) -> Dict:
+        """
+        从多图谱激活结果计算加权平均配置。
+
+        每个激活节点携带其来源图谱名，按激活分数加权合并各图谱的
+        temperature / creativity / persona_depth 配置。
+        单图谱模式下直接返回空字典（上游使用字符级设置）。
+        """
+        if not self.use_multi_kg or not hasattr(self.knowledge_graph, 'get_graph_config'):
+            return {}
+
+        # activated comes from MultiKnowledgeGraph.activate()
+        # Items are (node, score, graph_label)
+        graph_scores: Dict[str, float] = {}
+        for item in activated:
+            if len(item) >= 3:
+                _, score, graph_label = item
+                graph_scores[graph_label] = max(graph_scores.get(graph_label, 0), score)
+
+        if not graph_scores:
+            return {}
+
+        total = sum(graph_scores.values())
+        if total == 0:
+            return {}
+
+        # Weighted average of configs from contributing graphs
+        weighted = {"temperature": 0.0, "creativity": 0.0, "persona_depth": 0.0}
+        for graph_label, score in graph_scores.items():
+            cfg = self.knowledge_graph.get_graph_config(graph_label)
+            w = score / total
+            weighted["temperature"] += cfg.get("temperature", 0.7) * w
+            weighted["creativity"] += cfg.get("creativity", 0.5) * w
+            weighted["persona_depth"] += cfg.get("persona_depth", 1.0) * w
+
+        weighted["_graph_count"] = len(graph_scores)
+        logger.debug(f"[MultiKG] Effective config from {len(graph_scores)} graphs: {weighted}")
+        return weighted
 
     def distill_from_chat_history(
         self,

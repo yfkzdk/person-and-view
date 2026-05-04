@@ -27,6 +27,10 @@ from src.state.session_manager import SessionManager
 from src.utils.audio_utils import convert_to_float32
 from src.memory.knowledge_graph import KnowledgeGraph, MultiKnowledgeGraph
 from src.dialogue.dialogue_manager import DialogueManager
+from src.memory.evolution_engine import (
+    run_evolution_cycle, confirm_candidate, reject_candidate,
+    get_evolution_status, cleanup_evolution_nodes
+)
 from src.api.character_routes import setup_character_routes
 from src.api.voice_routes import setup_voice_routes
 
@@ -92,7 +96,8 @@ DEFAULT_SETTINGS = {
     },
     "knowledge": {
         "enabled_nodes": [],
-        "disabled_nodes": []
+        "disabled_nodes": [],
+        "use_multi_kg": True
     }
 }
 
@@ -137,11 +142,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     # 初始化对话管理器
     try:
+        session_cfg = get_session_settings(session_id)
+        use_multi_kg = session_cfg.get("knowledge", {}).get("use_multi_kg", True)
         dialogue_managers[session_id] = DialogueManager(
             character_name="童锦程",
             enable_memory=True,
             enable_emotion=True,
-            enable_tts=True
+            enable_tts=True,
+            use_multi_kg=use_multi_kg
         )
         logger.info(f"[Session {session_id}] Dialogue manager initialized with character switching and voice support")
     except Exception as e:
@@ -590,6 +598,123 @@ async def api_update_multi_configs(character_name: str, session_id: str = "defau
         settings["knowledge"] = {}
     settings["knowledge"]["graph_configs"] = mkg.get_all_configs()
     return JSONResponse({"status": "ok", "configs": mkg.get_all_configs()})
+
+
+# ==================== 自进化 API ====================
+
+@app.get("/api/evolution/{character_name}/status")
+async def api_get_evolution_status(character_name: str, session_id: str = "default"):
+    """获取进化状态：pending 候选、历史记录、健康状态。"""
+    settings = get_session_settings(session_id)
+    status = get_evolution_status(settings)
+    return JSONResponse(status)
+
+
+@app.post("/api/evolution/{character_name}/trigger")
+async def api_trigger_evolution(character_name: str, session_id: str = "default"):
+    """手动触发一轮进化检测（调试用）。"""
+    settings = get_session_settings(session_id)
+    mkg = _get_or_create_multi_kg(character_name, session_id) if session_id in session_multi_kgs else None
+    all_nodes, all_edges = {}, []
+    if mkg:
+        all_nodes, all_edges = mkg.get_all_nodes_and_edges()
+
+    result = run_evolution_cycle(
+        settings=settings,
+        character_name=character_name,
+        force=True,
+        existing_nodes=all_nodes,
+        existing_edges=all_edges
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/evolution/{character_name}/confirm")
+async def api_confirm_evolution(character_name: str, session_id: str = "default", body: dict = Body(None)):
+    """
+    确认一个候选节点，注入到知识图谱。
+    body: {
+        candidate_index: 0,
+        custom_label?: str,
+        custom_summary?: str,
+        custom_triggers?: [str]
+    }
+    """
+    if not body or "candidate_index" not in body:
+        return JSONResponse({"error": "need candidate_index"}, status_code=400)
+
+    settings = get_session_settings(session_id)
+
+    try:
+        confirmed = confirm_candidate(
+            settings=settings,
+            candidate_index=body["candidate_index"],
+            custom_label=body.get("custom_label"),
+            custom_summary=body.get("custom_summary"),
+            custom_triggers=body.get("custom_triggers"),
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    # Inject into MultiKnowledgeGraph
+    mkg = _get_or_create_multi_kg(character_name, session_id)
+    node_data = confirmed["node"]
+    edge_data = confirmed.get("edge")
+
+    merge_target = node_data.pop("_merge_into", None)
+
+    if merge_target:
+        # Merge into existing node
+        from src.memory.consistency_guard import merge_candidate_into_existing
+        all_nodes, _ = mkg.get_all_nodes_and_edges()
+        merged = merge_candidate_into_existing(node_data, merge_target, all_nodes)
+        mkg.primary.upsert_node(merged)
+        result_msg = f"merged into {merge_target}"
+    else:
+        # Create new node
+        inserted = mkg.primary.upsert_node(node_data)
+        result_msg = f"created node {inserted.id}"
+
+        if edge_data:
+            try:
+                from src.memory.knowledge_graph import KGEdge
+                src_id = KnowledgeGraph._sanitize_id(edge_data["source"])
+                tgt_id = edge_data["target"]
+                mkg.primary.upsert_edge({
+                    "source": src_id,
+                    "target": tgt_id,
+                    "relation": edge_data.get("relation", "contradicts"),
+                    "description": edge_data.get("description", "")
+                })
+                result_msg += f" + edge to {tgt_id}"
+            except Exception as e:
+                logger.warning(f"Edge creation failed: {e}")
+
+    return JSONResponse({"status": "ok", "result": result_msg, "confirmed": confirmed})
+
+
+@app.post("/api/evolution/{character_name}/reject")
+async def api_reject_evolution(character_name: str, session_id: str = "default", body: dict = Body(None)):
+    """拒绝一个候选节点，该 gap 进入 30 轮冷却期。"""
+    if not body or "candidate_index" not in body:
+        return JSONResponse({"error": "need candidate_index"}, status_code=400)
+
+    settings = get_session_settings(session_id)
+    try:
+        result = reject_candidate(settings, body["candidate_index"])
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    return JSONResponse({"status": "ok", "rejected": result["rejected"], "cooldown_turns": result["cooldown_turns"]})
+
+
+@app.post("/api/evolution/{character_name}/cleanup")
+async def api_cleanup_evolution(character_name: str, session_id: str = "default", body: dict = Body(None)):
+    """清理进化历史节点。body: {keep_ids?: [str]} — 不传则清空全部。"""
+    settings = get_session_settings(session_id)
+    keep_ids = body.get("keep_ids") if body else None
+    removed = cleanup_evolution_nodes(settings, keep_ids)
+    return JSONResponse({"status": "ok", "removed": removed})
 
 
 # ==================== 会话清理 ====================

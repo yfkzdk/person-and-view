@@ -38,3 +38,5 @@ async def test_tts_throughput():
 
     duration = time.perf_counter() - start
     print(f"\nTTS Throughput: chunks={chunk_count}, duration={duration:.2f}s")
+    assert chunk_count > 0, "Expected at least 1 audio chunk"
+    assert duration < 30.0, f"TTS took {duration:.1f}s, expected < 30s"

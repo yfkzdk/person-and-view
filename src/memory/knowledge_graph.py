@@ -254,6 +254,34 @@ class KnowledgeGraph:
     def set_disabled_nodes(self, node_ids: List[str]):
         self._disabled_nodes = set(node_ids)
 
+    # ---- 一致性检查（供进化引擎） ----
+
+    def check_consistency(self, candidate: dict) -> dict:
+        """
+        对候选节点执行一致性检查（委托 consistency_guard）。
+
+        Args:
+            candidate: {"label", "summary", "content", "triggers", "tags"}
+
+        Returns:
+            {"passed": bool, "checks": {...}, "suggestions": [...],
+             "contradicts_edge": {...} or None, "merge_target": str or None}
+        """
+        from src.memory.consistency_guard import check_consistency as _check
+        result = _check(
+            candidate,
+            self.nodes,
+            self.character_name,
+            self.edges
+        )
+        return {
+            "passed": result.passed,
+            "checks": result.checks,
+            "suggestions": result.suggestions,
+            "contradicts_edge": result.contradicts_edge,
+            "merge_target": result.merge_target,
+        }
+
     # ---- 完整图谱导出（供前端可视化） ----
 
     def to_dict(self) -> Dict:
@@ -418,7 +446,11 @@ class KnowledgeGraph:
 MULTI_GRAPH_CONFIG = {
     "童锦程": {
         "primary": "童锦程",
-        "supplements": ["童锦程_行为动力学", "童锦程_价值网络", "童锦程_衍生思想"]
+        "supplements": [
+            "童锦程_行为动力学", "童锦程_价值网络", "童锦程_衍生思想",
+            "童锦程_七情六欲", "童锦程_纳瓦尔", "童锦程_费曼",
+            "童锦程_郭德纲", "童锦程_张爱玲"
+        ]
     }
 }
 
@@ -592,3 +624,20 @@ class MultiKnowledgeGraph:
         """在所有图谱中设置禁用节点。"""
         for kg in ([self.primary] if self.primary else []) + self.supplements:
             kg.set_disabled_nodes([nid for nid in node_ids if nid in kg.nodes])
+
+    # ---- 一致性检查（供进化引擎） ----
+
+    def check_consistency(self, candidate: dict) -> dict:
+        """对候选节点执行一致性检查（委托 primary 图谱）。"""
+        if self.primary:
+            return self.primary.check_consistency(candidate)
+        return {"passed": True, "checks": {}, "suggestions": [], "contradicts_edge": None, "merge_target": None}
+
+    def get_all_nodes_and_edges(self) -> tuple:
+        """汇总所有图谱的节点和边（供进化引擎一致性检查）。"""
+        all_nodes = {}
+        all_edges = []
+        for kg in ([self.primary] if self.primary else []) + self.supplements:
+            all_nodes.update(kg.nodes)
+            all_edges.extend(kg.edges)
+        return all_nodes, all_edges
