@@ -339,8 +339,9 @@ class DeepSeekClient:
         await self.client.aclose()
 
     def __del__(self):
-        """析构函数"""
+        """析构函数 — 同步清理，不调用异步 close。调用方应显式 await client.close()。"""
         try:
-            asyncio.create_task(self.close())
-        except:
-            pass
+            if hasattr(self, 'client') and not self.client.is_closed:
+                logger.warning("DeepSeekClient.__del__ called without explicit close(); HTTP connections may leak")
+        except Exception:
+            pass  # __del__ must never raise

@@ -45,8 +45,8 @@ class RedisStateManager:
         if self.redis_client:
             try:
                 await self.redis_client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Redis stats error, falling back to local cache: {e}")
 
     async def get(self, session_id: str) -> Optional[SessionState]:
         if self.use_redis and self.redis_client:
@@ -91,6 +91,6 @@ class RedisStateManager:
             try:
                 info = await self.redis_client.info()
                 return {"backend": "redis", "keys": info.get("db0", {}).get("keys", 0)}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Redis stats error, falling back to local cache: {e}")
         return {"backend": "local_cache", "size": self.local_cache.get_size()}

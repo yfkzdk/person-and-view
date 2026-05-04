@@ -41,8 +41,8 @@ def _build_skill_index(skill_repo_path: str = None) -> Dict[str, List[Dict]]:
             concepts = _parse_skill_md_light(skill_md)
             if concepts:
                 index[skill_name] = concepts
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to parse SKILL.md {skill_md}: {e}")
 
     # 2. 从 persona-skills.md 摘要中提取 skill 信息
     catalog_md = base / "persona-skills.md"
@@ -74,8 +74,8 @@ def _parse_skill_md_light(filepath: Path) -> List[Dict]:
         try:
             import yaml
             frontmatter = yaml.safe_load(fm_match.group(1)) or {}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to parse YAML frontmatter in {filepath}: {e}")
 
     desc = frontmatter.get("description", "")
     # 提取触发词

@@ -283,8 +283,8 @@ def _get_character_voice_bindings() -> Dict[str, str]:
         try:
             with open(BINDINGS_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to load voice bindings from {BINDINGS_FILE}: {e}")
     # 默认绑定
     return {
         "童锦程": "tong_jincheng",
